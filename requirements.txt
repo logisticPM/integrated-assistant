@@ -1,3 +1,4 @@
+# 基础依赖
 gradio>=4.0.0
 flask>=2.0.0
 pyyaml>=6.0
@@ -7,3 +8,16 @@ python-dotenv>=0.19.0
 markdown>=3.3.0
 python-dateutil>=2.8.0
 tqdm>=4.62.0
+
+# Gmail API
+google-api-python-client>=2.108.0
+google-auth-httplib2>=0.1.1
+google-auth-oauthlib>=1.1.0
+
+# 知识库依赖
+lancedb>=0.3.0
+sentence-transformers>=2.2.2
+pypdf>=3.15.1
+python-docx>=0.8.11
+langchain>=0.0.267
+langchain-text-splitters>=0.0.1

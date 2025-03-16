@@ -10,8 +10,14 @@ import json
 import time
 import logging
 import sqlite3
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
+import importlib.util
+
+# 导入知识库相关模块
+from mcp.docloader import load_document
+from mcp.text_splitter import get_text_splitter
+from mcp.embedder import get_embedder
 
 # 配置日志
 logging.basicConfig(
@@ -35,9 +41,18 @@ class VectorDatabaseService:
         self.config = config
         self.db_path = db_path
         self.vector_db_path = vector_db_path
-        self.docs_dir = config["knowledge"]["docs_dir"]
-        self.chunk_size = config["knowledge"]["chunk_size"]
-        self.chunk_overlap = config["knowledge"]["chunk_overlap"]
+        
+        # 知识库配置
+        knowledge_config = config.get("knowledge", {})
+        self.docs_dir = knowledge_config.get("docs_dir", "./data/documents")
+        self.chunk_size = knowledge_config.get("chunk_size", 1000)
+        self.chunk_overlap = knowledge_config.get("chunk_overlap", 200)
+        self.embedding_model = knowledge_config.get("embedding_model", "all-MiniLM-L6-v2")
+        self.splitter_type = knowledge_config.get("splitter_type", "smart")
+        self.supported_extensions = knowledge_config.get("supported_extensions", 
+                                                        [".txt", ".md", ".pdf", ".docx", ".html", ".csv"])
+        self.use_mock_embedder = knowledge_config.get("use_mock_embedder", False)
+        self.vector_search_top_k = knowledge_config.get("vector_search_top_k", 5)
         
         # 确保目录存在
         os.makedirs(self.docs_dir, exist_ok=True)
@@ -46,8 +61,23 @@ class VectorDatabaseService:
         # 初始化数据库
         self._init_db()
         
-        # 初始化LanceDB（模拟）
-        self._init_lancedb()
+        # 初始化向量数据库
+        self._init_vector_db()
+        
+        # 初始化文本分块器
+        self.text_splitter = get_text_splitter(
+            splitter_type=self.splitter_type,
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap
+        )
+        
+        # 初始化嵌入器
+        self.embedder = get_embedder(
+            model_name=self.embedding_model,
+            use_mock=self.use_mock_embedder
+        )
+        
+        logger.info(f"向量数据库服务初始化完成，使用嵌入模型: {self.embedding_model}")
     
     def _init_db(self):
         """初始化SQLite数据库表"""
@@ -63,7 +93,8 @@ class VectorDatabaseService:
             file_path TEXT NOT NULL,
             status TEXT NOT NULL,
             created_at REAL NOT NULL,
-            processed_at REAL
+            processed_at REAL,
+            project_id TEXT DEFAULT "default"
         )
         ''')
         
@@ -93,13 +124,13 @@ class VectorDatabaseService:
         conn.commit()
         conn.close()
     
-    def _init_lancedb(self):
-        """初始化LanceDB（模拟）"""
-        # 实际项目中，这里应该初始化LanceDB连接
+    def _init_vector_db(self):
+        """初始化向量数据库"""
+        # 实际项目中，这里应该初始化向量数据库连接
         # 由于这是一个模拟实现，我们只记录日志
-        logger.info("初始化LanceDB向量数据库（模拟）")
+        logger.info("初始化向量数据库（模拟）")
     
-    def create_document(self, title: str, category: str, tags: List[str], file_path: str) -> str:
+    def create_document(self, title: str, category: str, tags: List[str], file_path: str, project_id: str = "default") -> str:
         """
         创建文档记录
         
@@ -108,6 +139,7 @@ class VectorDatabaseService:
             category: 文档类别
             tags: 文档标签
             file_path: 文件路径
+            project_id: 项目ID
         
         Returns:
             文档ID
@@ -132,8 +164,8 @@ class VectorDatabaseService:
         cursor = conn.cursor()
         
         cursor.execute(
-            "INSERT INTO documents (id, title, category, file_path, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (document_id, title, category, target_path, "pending", time.time())
+            "INSERT INTO documents (id, title, category, file_path, status, created_at, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (document_id, title, category, target_path, "pending", time.time(), project_id)
         )
         
         # 保存文档标签
@@ -179,13 +211,16 @@ class VectorDatabaseService:
         conn.commit()
         
         try:
-            # 读取文档内容
-            file_content = self._read_file_content(file_path)
+            # 使用文档加载器读取文档内容
+            logger.info(f"开始处理文档: {title} ({file_path})")
+            file_content = load_document(file_path)
             
-            # 分块
-            chunks = self._split_text(file_content)
+            # 使用文本分块器分块
+            logger.info(f"使用 {self.splitter_type} 分块器进行文本分块")
+            chunks = self.text_splitter.split_text(file_content)
             
             # 保存分块
+            logger.info(f"保存 {len(chunks)} 个文本块")
             for i, chunk in enumerate(chunks):
                 chunk_id = f"{document_id}_chunk_{i}"
                 
@@ -201,14 +236,14 @@ class VectorDatabaseService:
             )
             conn.commit()
             
-            # 向量化分块（实际项目中应该调用LLM服务获取嵌入向量）
+            # 向量化分块
             self._vectorize_chunks(document_id)
             
             logger.info(f"文档处理完成: {document_id}, 分块数: {len(chunks)}")
             return True
         
         except Exception as e:
-            logger.exception(f"文档处理失败: {document_id}")
+            logger.exception(f"文档处理失败: {document_id}, 错误: {str(e)}")
             
             # 更新文档状态为失败
             cursor.execute(
@@ -224,7 +259,7 @@ class VectorDatabaseService:
     
     def _read_file_content(self, file_path: str) -> str:
         """
-        读取文件内容
+        读取文件内容（已弃用，使用docloader模块代替）
         
         Args:
             file_path: 文件路径
@@ -232,29 +267,12 @@ class VectorDatabaseService:
         Returns:
             文件内容
         """
-        # 根据文件类型选择不同的读取方法
-        file_ext = os.path.splitext(file_path)[1].lower()
-        
-        if file_ext in ['.txt', '.md', '.py', '.js', '.html', '.css', '.java', '.c', '.cpp']:
-            # 文本文件
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read()
-        
-        elif file_ext in ['.pdf']:
-            # PDF文件（模拟）
-            return f"这是从PDF文件 {os.path.basename(file_path)} 中提取的文本内容。实际项目中应该使用PyPDF2或pdfplumber等库提取文本。"
-        
-        elif file_ext in ['.docx', '.doc']:
-            # Word文件（模拟）
-            return f"这是从Word文件 {os.path.basename(file_path)} 中提取的文本内容。实际项目中应该使用python-docx等库提取文本。"
-        
-        else:
-            # 不支持的文件类型
-            return f"不支持的文件类型: {file_ext}"
+        # 使用文档加载器读取文件内容
+        return load_document(file_path)
     
     def _split_text(self, text: str) -> List[str]:
         """
-        将文本分块
+        将文本分块（已弃用，使用text_splitter模块代替）
         
         Args:
             text: 输入文本
@@ -262,47 +280,8 @@ class VectorDatabaseService:
         Returns:
             文本块列表
         """
-        # 简单的分块实现，实际项目中应该使用更复杂的分块策略
-        chunks = []
-        
-        # 按段落分割
-        paragraphs = text.split('\n\n')
-        
-        current_chunk = ""
-        for paragraph in paragraphs:
-            # 如果段落加上当前块不超过块大小，则添加到当前块
-            if len(current_chunk) + len(paragraph) < self.chunk_size:
-                if current_chunk:
-                    current_chunk += "\n\n"
-                current_chunk += paragraph
-            else:
-                # 如果当前块不为空，则添加到块列表
-                if current_chunk:
-                    chunks.append(current_chunk)
-                
-                # 如果段落大小超过块大小，则进一步分割
-                if len(paragraph) > self.chunk_size:
-                    # 按句子分割
-                    sentences = paragraph.replace('. ', '.\n').split('\n')
-                    
-                    current_chunk = ""
-                    for sentence in sentences:
-                        if len(current_chunk) + len(sentence) < self.chunk_size:
-                            if current_chunk:
-                                current_chunk += " "
-                            current_chunk += sentence
-                        else:
-                            if current_chunk:
-                                chunks.append(current_chunk)
-                            current_chunk = sentence
-                else:
-                    current_chunk = paragraph
-        
-        # 添加最后一个块
-        if current_chunk:
-            chunks.append(current_chunk)
-        
-        return chunks
+        # 使用文本分块器分块
+        return self.text_splitter.split_text(text)
     
     def _vectorize_chunks(self, document_id: str):
         """
@@ -318,23 +297,42 @@ class VectorDatabaseService:
         cursor.execute("SELECT id, content FROM document_chunks WHERE document_id = ? ORDER BY chunk_index", (document_id,))
         chunks = cursor.fetchall()
         
-        # 模拟向量化过程
-        for chunk_id, content in chunks:
-            # 生成向量ID
-            vector_id = f"vector_{chunk_id}"
-            
-            # 更新向量ID
-            cursor.execute(
-                "UPDATE document_chunks SET vector_id = ? WHERE id = ?",
-                (vector_id, chunk_id)
-            )
-            
-            # 实际项目中，这里应该调用LLM服务获取嵌入向量，并存储到LanceDB
-            # 这里只是模拟
-            logger.info(f"向量化文档块: {chunk_id}")
+        if not chunks:
+            logger.warning(f"未找到文档块: {document_id}")
+            conn.close()
+            return
         
-        conn.commit()
-        conn.close()
+        try:
+            # 提取文本内容
+            chunk_ids = [chunk_id for chunk_id, _ in chunks]
+            texts = [content for _, content in chunks]
+            
+            # 使用嵌入器生成向量
+            logger.info(f"开始向量化 {len(texts)} 个文本块")
+            embeddings = self.embedder.embed(texts)
+            
+            # 保存向量到数据库
+            for i, (chunk_id, embedding) in enumerate(zip(chunk_ids, embeddings)):
+                # 生成向量ID
+                vector_id = f"vector_{chunk_id}"
+                
+                # 更新向量ID
+                cursor.execute(
+                    "UPDATE document_chunks SET vector_id = ? WHERE id = ?",
+                    (vector_id, chunk_id)
+                )
+                
+                # 实际项目中，这里应该将向量存储到向量数据库中
+                # 这里我们仅记录日志
+                logger.info(f"向量化文档块 ({i+1}/{len(texts)}): {chunk_id}")
+            
+            conn.commit()
+            logger.info(f"文档块向量化完成: {document_id}")
+            
+        except Exception as e:
+            logger.exception(f"向量化文档块时出错: {str(e)}")
+        finally:
+            conn.close()
     
     def search(self, query: str, category: str = None, tags: List[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
         """
@@ -349,66 +347,109 @@ class VectorDatabaseService:
         Returns:
             搜索结果列表
         """
-        # 实际项目中，这里应该调用LLM服务获取查询的嵌入向量，然后在LanceDB中进行相似度搜索
-        # 这里使用模拟的搜索结果
+        if not query.strip():
+            logger.warning("搜索查询为空")
+            return []
         
-        # 构建SQL查询
-        sql = """
-        SELECT dc.id, d.id as document_id, d.title, d.category, dc.content, dc.chunk_index
-        FROM document_chunks dc
-        JOIN documents d ON dc.document_id = d.id
-        WHERE d.status = 'processed'
+        try:
+            # 获取查询的嵌入向量
+            logger.info(f"生成查询的嵌入向量: {query}")
+            query_embedding = self.embedder.embed([query])[0]
+            
+            # 构建SQL查询获取所有文档块
+            sql = """
+            SELECT dc.id, d.id as document_id, d.title, d.category, dc.content, dc.chunk_index, dc.vector_id
+            FROM document_chunks dc
+            JOIN documents d ON dc.document_id = d.id
+            WHERE d.status = 'processed'
+            """
+            
+            params = []
+            
+            if category:
+                sql += " AND d.category = ?"
+                params.append(category)
+            
+            if tags and len(tags) > 0:
+                placeholders = ", ".join(["?"] * len(tags))
+                sql += f" AND d.id IN (SELECT document_id FROM document_tags WHERE tag IN ({placeholders}) GROUP BY document_id HAVING COUNT(DISTINCT tag) = ?)"
+                params.extend(tags)
+                params.append(len(tags))
+            
+            # 执行查询
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute(sql, params)
+            results = cursor.fetchall()
+            
+            if not results:
+                logger.info("未找到匹配的文档块")
+                conn.close()
+                return []
+            
+            # 计算向量相似度并排序
+            search_results = []
+            for row in results:
+                chunk_id, document_id, title, category, content, chunk_index, vector_id = row
+                
+                # 提取相关段落
+                snippet = self._extract_snippet(content, query)
+                
+                # 计算相似度分数
+                relevance = self._calculate_similarity(query_embedding, chunk_id)
+                
+                search_results.append({
+                    "chunk_id": chunk_id,
+                    "document_id": document_id,
+                    "title": title,
+                    "category": category,
+                    "snippet": snippet,
+                    "relevance": relevance
+                })
+            
+            # 按相关度排序
+            search_results.sort(key=lambda x: x["relevance"], reverse=True)
+            
+            # 限制返回数量
+            search_results = search_results[:limit]
+            
+            logger.info(f"搜索完成，找到 {len(search_results)} 个结果")
+            conn.close()
+            return search_results
+            
+        except Exception as e:
+            logger.exception(f"搜索时出错: {str(e)}")
+            return []
+    
+    def _calculate_similarity(self, query_embedding: List[float], chunk_id: str) -> float:
         """
+        计算查询向量与文档块向量的相似度
         
-        params = []
+        Args:
+            query_embedding: 查询嵌入向量
+            chunk_id: 文档块ID
         
-        if category:
-            sql += " AND d.category = ?"
-            params.append(category)
-        
-        if tags and len(tags) > 0:
-            placeholders = ", ".join(["?"] * len(tags))
-            sql += f" AND d.id IN (SELECT document_id FROM document_tags WHERE tag IN ({placeholders}) GROUP BY document_id HAVING COUNT(DISTINCT tag) = ?)"
-            params.extend(tags)
-            params.append(len(tags))
-        
-        sql += " ORDER BY dc.created_at DESC LIMIT ?"
-        params.append(limit)
-        
-        # 执行查询
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute(sql, params)
-        results = cursor.fetchall()
-        conn.close()
-        
-        # 格式化搜索结果
-        search_results = []
-        for row in results:
-            chunk_id, document_id, title, category, content, chunk_index = row
+        Returns:
+            相似度分数
+        """
+        try:
+            # 实际项目中，这里应该从向量数据库中检索向量并计算相似度
+            # 由于这是一个模拟实现，我们使用基于chunk_id的伪随机相似度
+            import numpy as np
+            import hashlib
             
-            # 计算相关度分数（模拟）
-            # 实际项目中，这应该是向量相似度分数
-            import random
-            relevance = random.uniform(0.5, 0.95)
+            # 使用chunk_id的哈希值作为随机种子
+            seed = int(hashlib.md5(chunk_id.encode()).hexdigest(), 16) % (2**32)
+            np.random.seed(seed)
             
-            # 提取相关段落
-            snippet = self._extract_snippet(content, query)
+            # 生成一个0.5到0.95之间的随机相似度
+            similarity = np.random.uniform(0.5, 0.95)
             
-            search_results.append({
-                "chunk_id": chunk_id,
-                "document_id": document_id,
-                "title": title,
-                "category": category,
-                "snippet": snippet,
-                "relevance": relevance
-            })
-        
-        # 按相关度排序
-        search_results.sort(key=lambda x: x["relevance"], reverse=True)
-        
-        return search_results
+            return float(similarity)
+        except Exception as e:
+            logger.exception(f"计算相似度时出错: {str(e)}")
+            return 0.0
     
     def _extract_snippet(self, content: str, query: str) -> str:
         """
@@ -421,9 +462,6 @@ class VectorDatabaseService:
         Returns:
             相关片段
         """
-        # 简单的片段提取实现
-        # 实际项目中应该使用更复杂的算法
-        
         # 如果内容较短，直接返回
         if len(content) < 200:
             return content
@@ -450,27 +488,27 @@ class VectorDatabaseService:
         
         # 调整开始位置到句子边界
         if start > 0:
-            sentence_start = content.rfind('. ', 0, start)
-            if sentence_start != -1:
-                start = sentence_start + 2
+            # 尝试找到前一个句号或换行符
+            for i in range(start, max(0, start-50), -1):
+                if content[i] in ['.', '!', '?', '\n']:
+                    start = i + 1
+                    break
         
         # 调整结束位置到句子边界
         if end < len(content):
-            sentence_end = content.find('. ', end)
-            if sentence_end != -1:
-                end = sentence_end + 1
+            # 尝试找到下一个句号或换行符
+            for i in range(end, min(len(content), end+50)):
+                if content[i] in ['.', '!', '?', '\n']:
+                    end = i + 1
+                    break
         
         snippet = content[start:end].strip()
         
-        # 如果片段不是以句号结尾，添加省略号
-        if not snippet.endswith('.'):
-            snippet += '...'
+        # 如果片段太短，返回原始内容的前200个字符
+        if len(snippet) < 50:
+            return content[:200] + "..."
         
-        # 如果片段不是以大写字母开头，添加省略号
-        if not snippet[0].isupper():
-            snippet = '...' + snippet
-        
-        return snippet
+        return snippet + ("..." if end < len(content) else "")
     
     def get_chunk(self, chunk_id: str) -> Dict[str, Any]:
         """
@@ -700,6 +738,190 @@ class VectorDatabaseService:
             return "知识库中有多份技术文档，包括项目规格说明书、API文档和用户手册。您需要哪一类文档的具体信息？"
         else:
             return f"我已经查询了知识库，找到了一些相关信息。根据文档内容，我认为：{search_results[0]['snippet']}"
+    
+    def search_documents(self, query: str, project_id: str = None, category: str = None, 
+                        tags: List[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        搜索文档
+        
+        Args:
+            query: 搜索查询
+            project_id: 项目ID过滤
+            category: 类别过滤
+            tags: 标签过滤
+            limit: 最大返回数量
+        
+        Returns:
+            文档列表
+        """
+        try:
+            # 获取文档列表
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 构建查询条件
+            conditions = ["status = 'processed'"]
+            params = []
+            
+            if project_id:
+                conditions.append("project_id = ?")
+                params.append(project_id)
+            
+            if category:
+                conditions.append("category = ?")
+                params.append(category)
+            
+            # 执行查询
+            query_sql = f"SELECT * FROM documents WHERE {' AND '.join(conditions)} ORDER BY created_at DESC"
+            cursor.execute(query_sql, params)
+            
+            documents = []
+            for row in cursor.fetchall():
+                document = dict(row)
+                
+                # 如果有标签过滤，检查文档是否包含所有指定标签
+                if tags:
+                    cursor.execute(
+                        f"SELECT COUNT(*) FROM document_tags WHERE document_id = ? AND tag IN ({','.join(['?'] * len(tags))})",
+                        [document['id']] + tags
+                    )
+                    tag_count = cursor.fetchone()[0]
+                    if tag_count < len(tags):
+                        continue
+                
+                # 获取文档标签
+                cursor.execute("SELECT tag FROM document_tags WHERE document_id = ?", (document['id'],))
+                document['tags'] = [row[0] for row in cursor.fetchall()]
+                
+                documents.append(document)
+            
+            # 如果没有查询词，直接返回文档列表
+            if not query or query.strip() == "":
+                return documents[:limit]
+            
+            # 使用向量搜索查询相关文档
+            results = self.vector_search(query, project_id=project_id, limit=limit)
+            
+            # 合并结果
+            result_docs = []
+            doc_ids = set()
+            
+            # 首先添加向量搜索结果
+            for result in results:
+                doc_id = result["document_id"]
+                if doc_id not in doc_ids:
+                    # 查找文档信息
+                    for doc in documents:
+                        if doc["id"] == doc_id:
+                            result_docs.append(doc)
+                            doc_ids.add(doc_id)
+                            break
+            
+            # 如果结果不足，添加其他文档
+            for doc in documents:
+                if len(result_docs) >= limit:
+                    break
+                if doc["id"] not in doc_ids:
+                    result_docs.append(doc)
+                    doc_ids.add(doc["id"])
+            
+            return result_docs
+        
+        except Exception as e:
+            logger.exception(f"搜索文档失败: {str(e)}")
+            return []
+    
+    def vector_search(self, query: str, project_id: str = None, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        向量搜索
+        
+        Args:
+            query: 搜索查询
+            project_id: 项目ID过滤
+            limit: 最大返回数量
+        
+        Returns:
+            搜索结果
+        """
+        try:
+            # 对查询文本进行向量化
+            query_embedding = self.embedder.embed_query(query)
+            
+            # 获取文档块
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 构建查询条件
+            if project_id:
+                # 获取特定项目的文档块
+                cursor.execute('''
+                SELECT c.id, c.document_id, c.content, c.chunk_index
+                FROM document_chunks c
+                JOIN documents d ON c.document_id = d.id
+                WHERE d.status = 'processed' AND d.project_id = ?
+                ''', (project_id,))
+            else:
+                # 获取所有文档块
+                cursor.execute('''
+                SELECT c.id, c.document_id, c.content, c.chunk_index
+                FROM document_chunks c
+                JOIN documents d ON c.document_id = d.id
+                WHERE d.status = 'processed'
+                ''')
+            
+            chunks = []
+            for row in cursor.fetchall():
+                chunks.append(dict(row))
+            
+            # 如果没有文档块，返回空结果
+            if not chunks:
+                return []
+            
+            # 计算相似度
+            chunk_contents = [chunk["content"] for chunk in chunks]
+            chunk_embeddings = self.embedder.embed_documents(chunk_contents)
+            
+            # 计算余弦相似度
+            import numpy as np
+            from sklearn.metrics.pairwise import cosine_similarity
+            
+            similarities = cosine_similarity(
+                np.array(query_embedding).reshape(1, -1),
+                np.array(chunk_embeddings)
+            )[0]
+            
+            # 添加相似度到结果
+            for i, chunk in enumerate(chunks):
+                chunk["similarity"] = float(similarities[i])
+            
+            # 按相似度排序
+            chunks.sort(key=lambda x: x["similarity"], reverse=True)
+            
+            # 获取文档信息
+            results = []
+            for chunk in chunks[:limit]:
+                # 获取文档信息
+                cursor.execute("SELECT title FROM documents WHERE id = ?", (chunk["document_id"],))
+                doc_row = cursor.fetchone()
+                
+                if doc_row:
+                    results.append({
+                        "id": chunk["id"],
+                        "document_id": chunk["document_id"],
+                        "title": doc_row["title"],
+                        "content": chunk["content"],
+                        "chunk_index": chunk["chunk_index"],
+                        "similarity": chunk["similarity"]
+                    })
+            
+            conn.close()
+            return results
+        
+        except Exception as e:
+            logger.exception(f"向量搜索失败: {str(e)}")
+            return []
 
 def register_vector_service(server):
     """

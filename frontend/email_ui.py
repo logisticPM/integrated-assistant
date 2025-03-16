@@ -2,11 +2,12 @@
 # -*- coding: utf-8 -*-
 
 """
-邮件助手界面模块 - 提供邮件查看、分析和回复建议功能
+邮件助手界面模块 - 提供邮件查看、分析、回复建议和日历管理功能
 """
 
 import gradio as gr
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 
 class EmailInterface:
     """邮件助手界面类"""
@@ -39,6 +40,12 @@ class EmailInterface:
                 
                 with gr.TabItem("邮件搜索"):
                     self._create_email_search_interface()
+                
+                with gr.TabItem("日历"):
+                    self._create_calendar_interface()
+                
+                with gr.TabItem("Gmail设置"):
+                    self._create_gmail_settings_interface()
             
             return interface
     
@@ -67,8 +74,20 @@ class EmailInterface:
             # 获取邮件列表
             def get_emails(filter_type="全部"):
                 try:
-                    emails = self.mcp_client.call("email.list_emails", {
-                        "filter_type": filter_type
+                    # 使用Gmail服务获取邮件列表
+                    query = ""
+                    if filter_type == "未读":
+                        query = "is:unread"
+                    elif filter_type == "重要":
+                        query = "is:important"
+                    elif filter_type == "已标记":
+                        query = "is:starred"
+                    elif filter_type == "有附件":
+                        query = "has:attachment"
+                    
+                    emails = self.mcp_client.call("gmail.list_emails", {
+                        "max_results": 50,
+                        "query": query
                     })
                     
                     # 格式化邮件列表数据
@@ -79,7 +98,7 @@ class EmailInterface:
                             email["sender"],
                             email["subject"],
                             email["date"],
-                            email["status"]
+                            "未读" if email.get("unread", False) else "已读"
                         ])
                     
                     return formatted_emails
@@ -89,8 +108,13 @@ class EmailInterface:
             # 同步邮件
             def sync_emails():
                 try:
-                    result = self.mcp_client.call("email.sync", {})
-                    return f"邮件同步完成，新增 {result['new_emails']} 封邮件"
+                    # 调用邮件处理脚本
+                    result = self.mcp_client.call("system.run_script", {
+                        "script_name": "email_processor.py",
+                        "args": ["--auto-categorize"]
+                    })
+                    
+                    return f"邮件同步完成: {result.get('message', '成功')}"
                 except Exception as e:
                     return f"邮件同步失败: {str(e)}"
             
@@ -155,18 +179,23 @@ class EmailInterface:
                         lines=10,
                         interactive=True
                     )
-                    copy_btn = gr.Button("复制到剪贴板")
+                    send_reply_btn = gr.Button("发送回复")
+                    reply_status = gr.Textbox(label="回复状态", interactive=False)
             
             # 加载邮件详情
             def load_email_details(email_id):
                 if not email_id:
-                    return "", "", "", "", "", [], ""
+                    return "", "", "", "", [], ""
                 
                 try:
-                    # 获取邮件详情
-                    email_details = self.mcp_client.call("email.get_email", {
-                        "email_id": email_id
+                    # 使用Gmail服务获取邮件详情
+                    email_details = self.mcp_client.call("gmail.get_email", {
+                        "message_id": email_id,
+                        "include_body": True
                     })
+                    
+                    if not email_details:
+                        return "", "", "", "", [], "未找到邮件"
                     
                     # 格式化附件数据
                     formatted_attachments = []
@@ -183,7 +212,7 @@ class EmailInterface:
                         email_details.get("date", ""),
                         email_details.get("subject", ""),
                         formatted_attachments,
-                        email_details.get("content", "")
+                        email_details.get("body", "")
                     )
                 except Exception as e:
                     return "", "", "", "", [], f"加载失败: {str(e)}"
@@ -194,15 +223,61 @@ class EmailInterface:
                     return "请输入有效的邮件ID"
                 
                 try:
-                    # 调用生成回复API
-                    reply = self.mcp_client.call("email.generate_reply", {
-                        "email_id": email_id,
-                        "reply_type": reply_type
+                    # 获取邮件详情
+                    email_details = self.mcp_client.call("gmail.get_email", {
+                        "message_id": email_id,
+                        "include_body": True
                     })
                     
-                    return reply
+                    if not email_details:
+                        return "未找到邮件"
+                    
+                    # 调用LLM生成回复
+                    reply = self.mcp_client.call("llm.generate", {
+                        "prompt": f"""
+                        你是一位专业的邮件助手。请根据以下邮件内容，生成一个{reply_type}。
+                        
+                        发件人: {email_details.get('sender', '')}
+                        主题: {email_details.get('subject', '')}
+                        内容: {email_details.get('body', '')}
+                        
+                        请直接给出回复内容，不要包含解释。
+                        """,
+                        "max_tokens": 500
+                    })
+                    
+                    return reply.get("text", "生成回复失败")
                 except Exception as e:
                     return f"生成回复建议失败: {str(e)}"
+            
+            # 发送回复
+            def send_reply(email_id, subject, reply_content):
+                if not email_id or not reply_content:
+                    return "请输入有效的邮件ID和回复内容"
+                
+                try:
+                    # 获取邮件详情
+                    email_details = self.mcp_client.call("gmail.get_email", {
+                        "message_id": email_id
+                    })
+                    
+                    if not email_details:
+                        return "未找到邮件"
+                    
+                    # 发送回复
+                    result = self.mcp_client.call("gmail.send_email", {
+                        "to": email_details.get("sender", ""),
+                        "subject": f"Re: {subject}",
+                        "body": reply_content,
+                        "reply_to": email_id
+                    })
+                    
+                    if result.get("success", False):
+                        return "回复已发送"
+                    else:
+                        return f"发送回复失败: {result.get('message', '')}"
+                except Exception as e:
+                    return f"发送回复失败: {str(e)}"
             
             # 绑定事件
             load_btn.click(
@@ -222,6 +297,12 @@ class EmailInterface:
                 fn=generate_reply_suggestion,
                 inputs=[email_id_input, reply_type],
                 outputs=reply_content
+            )
+            
+            send_reply_btn.click(
+                fn=send_reply,
+                inputs=[email_id_input, email_subject, reply_content],
+                outputs=reply_status
             )
     
     def _create_email_analysis_interface(self):
@@ -263,13 +344,39 @@ class EmailInterface:
             # 运行邮件分析
             def run_email_analysis(period):
                 try:
-                    # 调用邮件分析API
-                    analysis_result = self.mcp_client.call("email.analyze", {
-                        "period": period
+                    # 构建查询
+                    query = ""
+                    if period == "今天":
+                        today = datetime.now().strftime("%Y/%m/%d")
+                        query = f"after:{today}"
+                    elif period == "本周":
+                        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y/%m/%d")
+                        query = f"after:{week_ago}"
+                    elif period == "本月":
+                        month_ago = (datetime.now() - timedelta(days=30)).strftime("%Y/%m/%d")
+                        query = f"after:{month_ago}"
+                    
+                    # 获取邮件列表
+                    emails = self.mcp_client.call("gmail.list_emails", {
+                        "max_results": 100,
+                        "query": query,
+                        "include_body": False
+                    })
+                    
+                    if not emails:
+                        return 0, 0, 0, None, None, None, []
+                    
+                    # 基本统计
+                    total = len(emails)
+                    unread = sum(1 for email in emails if email.get("unread", False))
+                    important = sum(1 for email in emails if email.get("important", False))
+                    
+                    # 调用分析服务
+                    analysis_result = self.mcp_client.call("email.analyze_batch", {
+                        "emails": emails
                     })
                     
                     # 提取分析结果
-                    email_stats = analysis_result.get("stats", {})
                     category_plot = analysis_result.get("category_plot", None)
                     sender_plot = analysis_result.get("sender_plot", None)
                     time_plot = analysis_result.get("time_plot", None)
@@ -285,9 +392,9 @@ class EmailInterface:
                         ])
                     
                     return (
-                        email_stats.get("total", 0),
-                        email_stats.get("unread", 0),
-                        email_stats.get("important", 0),
+                        total,
+                        unread,
+                        important,
                         category_plot,
                         sender_plot,
                         time_plot,
@@ -340,22 +447,40 @@ class EmailInterface:
                     return []
                 
                 try:
-                    # 调用邮件搜索API
-                    search_results = self.mcp_client.call("email.search", {
-                        "query": query,
-                        "search_type": search_type
-                    })
-                    
-                    # 格式化搜索结果
-                    formatted_results = []
-                    for result in search_results:
-                        formatted_results.append([
-                            result["id"],
-                            result["sender"],
-                            result["subject"],
-                            result["date"],
-                            result["relevance"]
-                        ])
+                    if search_type == "关键词搜索":
+                        # 直接使用Gmail搜索
+                        emails = self.mcp_client.call("gmail.list_emails", {
+                            "max_results": 50,
+                            "query": query
+                        })
+                        
+                        # 格式化搜索结果
+                        formatted_results = []
+                        for email in emails:
+                            formatted_results.append([
+                                email["id"],
+                                email["sender"],
+                                email["subject"],
+                                email["date"],
+                                1.0  # 关键词搜索不提供相关度
+                            ])
+                    else:
+                        # 语义搜索
+                        search_results = self.mcp_client.call("email.semantic_search", {
+                            "query": query,
+                            "max_results": 50
+                        })
+                        
+                        # 格式化搜索结果
+                        formatted_results = []
+                        for result in search_results:
+                            formatted_results.append([
+                                result["id"],
+                                result["sender"],
+                                result["subject"],
+                                result["date"],
+                                result["relevance"]
+                            ])
                     
                     return formatted_results
                 except Exception as e:
@@ -366,6 +491,253 @@ class EmailInterface:
                 fn=search_emails,
                 inputs=[search_input, search_type],
                 outputs=search_results
+            )
+    
+    def _create_calendar_interface(self):
+        """创建日历界面"""
+        with gr.Group():
+            gr.Markdown("### 日历管理")
+            
+            with gr.Tabs() as calendar_tabs:
+                with gr.TabItem("查看日程"):
+                    with gr.Row():
+                        date_picker = gr.Textbox(
+                            label="日期范围",
+                            placeholder="例如: 2023-06-01 或 2023-06-01,2023-06-07",
+                            value=datetime.now().strftime("%Y-%m-%d")
+                        )
+                        load_events_btn = gr.Button("加载日程")
+                    
+                    events_table = gr.Dataframe(
+                        headers=["ID", "标题", "开始时间", "结束时间", "地点", "参与者"],
+                        datatype=["str", "str", "str", "str", "str", "str"],
+                        label="日程列表"
+                    )
+                
+                with gr.TabItem("创建日程"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            event_title = gr.Textbox(label="标题", placeholder="会议标题")
+                            event_location = gr.Textbox(label="地点", placeholder="会议地点")
+                            event_participants = gr.Textbox(
+                                label="参与者",
+                                placeholder="用逗号分隔的邮箱地址"
+                            )
+                        
+                        with gr.Column(scale=1):
+                            event_start = gr.Textbox(
+                                label="开始时间",
+                                placeholder="格式: YYYY-MM-DD HH:MM",
+                                value=(datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+                            )
+                            event_end = gr.Textbox(
+                                label="结束时间",
+                                placeholder="格式: YYYY-MM-DD HH:MM",
+                                value=(datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+                            )
+                            timezone = gr.Dropdown(
+                                choices=["Asia/Shanghai", "America/New_York", "Europe/London", "UTC"],
+                                value="Asia/Shanghai",
+                                label="时区"
+                            )
+                    
+                    event_description = gr.Textbox(
+                        label="描述",
+                        placeholder="会议描述",
+                        lines=5
+                    )
+                    
+                    create_event_btn = gr.Button("创建日程")
+                    event_status = gr.Textbox(label="创建状态", interactive=False)
+            
+            # 加载日程
+            def load_calendar_events(date_range):
+                try:
+                    # 解析日期范围
+                    dates = [d.strip() for d in date_range.split(",")]
+                    
+                    # 获取日程
+                    events = self.mcp_client.call("gmail.get_events_for_days", {
+                        "date_strs": dates
+                    })
+                    
+                    # 格式化日程数据
+                    formatted_events = []
+                    for event in events:
+                        # 格式化参与者
+                        participants = ", ".join([p.get("email", "") for p in event.get("attendees", [])])
+                        
+                        formatted_events.append([
+                            event.get("id", ""),
+                            event.get("summary", ""),
+                            event.get("start", {}).get("dateTime", ""),
+                            event.get("end", {}).get("dateTime", ""),
+                            event.get("location", ""),
+                            participants
+                        ])
+                    
+                    return formatted_events
+                except Exception as e:
+                    return []
+            
+            # 创建日程
+            def create_calendar_event(title, start, end, description, location, participants, timezone):
+                if not title or not start or not end:
+                    return "请填写必要的日程信息"
+                
+                try:
+                    # 解析参与者
+                    emails = [email.strip() for email in participants.split(",") if email.strip()]
+                    
+                    # 创建日程
+                    result = self.mcp_client.call("gmail.send_calendar_invite", {
+                        "emails": emails,
+                        "title": title,
+                        "start_time": start,
+                        "end_time": end,
+                        "description": description,
+                        "location": location,
+                        "timezone": timezone
+                    })
+                    
+                    if result.get("success", False):
+                        return "日程创建成功"
+                    else:
+                        return f"日程创建失败: {result.get('message', '')}"
+                except Exception as e:
+                    return f"日程创建失败: {str(e)}"
+            
+            # 绑定事件
+            load_events_btn.click(
+                fn=load_calendar_events,
+                inputs=date_picker,
+                outputs=events_table
+            )
+            
+            create_event_btn.click(
+                fn=create_calendar_event,
+                inputs=[
+                    event_title,
+                    event_start,
+                    event_end,
+                    event_description,
+                    event_location,
+                    event_participants,
+                    timezone
+                ],
+                outputs=event_status
+            )
+    
+    def _create_gmail_settings_interface(self):
+        """创建Gmail设置界面"""
+        with gr.Group():
+            gr.Markdown("### Gmail设置")
+            
+            with gr.Row():
+                with gr.Column(scale=1):
+                    gr.Markdown("#### 认证状态")
+                    check_auth_btn = gr.Button("检查认证状态")
+                    auth_status = gr.Textbox(label="认证状态", interactive=False)
+                    
+                    gr.Markdown("#### 自动处理设置")
+                    auto_check_interval = gr.Slider(
+                        minimum=5,
+                        maximum=60,
+                        value=10,
+                        step=5,
+                        label="自动检查间隔（分钟）"
+                    )
+                    auto_categorize = gr.Checkbox(label="自动分类邮件", value=True)
+                    auto_reply = gr.Checkbox(label="启用自动回复", value=False)
+                    auto_mark_read = gr.Checkbox(label="自动标记为已读", value=False)
+                
+                with gr.Column(scale=1):
+                    gr.Markdown("#### 认证操作")
+                    client_secret_path = gr.Textbox(
+                        label="客户端密钥文件路径",
+                        placeholder="输入客户端密钥文件的完整路径"
+                    )
+                    setup_auth_btn = gr.Button("设置认证")
+                    
+                    gr.Markdown("#### 定时任务")
+                    setup_cron_btn = gr.Button("设置定时任务")
+                    cron_status = gr.Textbox(label="定时任务状态", interactive=False)
+            
+            # 检查认证状态
+            def check_gmail_auth():
+                try:
+                    # 测试Gmail连接
+                    result = self.mcp_client.call("gmail.test_connection")
+                    
+                    if result.get("success", False):
+                        return f"认证状态: 已认证\n关联邮箱: {result.get('email', '未知')}"
+                    else:
+                        return f"认证状态: 未认证\n错误信息: {result.get('message', '')}"
+                except Exception as e:
+                    return f"检查认证状态失败: {str(e)}"
+            
+            # 设置认证
+            def setup_gmail_auth(client_secret_path):
+                if not client_secret_path:
+                    return "请输入客户端密钥文件路径"
+                
+                try:
+                    # 调用设置脚本
+                    result = self.mcp_client.call("system.run_script", {
+                        "script_name": "setup_gmail.py",
+                        "args": [f"--client-secret={client_secret_path}"]
+                    })
+                    
+                    return f"设置认证结果: {result.get('message', '成功')}"
+                except Exception as e:
+                    return f"设置认证失败: {str(e)}"
+            
+            # 设置定时任务
+            def setup_cron_job(interval, auto_categorize, auto_reply, auto_mark_read):
+                try:
+                    # 构建参数
+                    args = [f"--interval={interval}", f"--minutes-since={interval}"]
+                    
+                    if auto_categorize:
+                        args.append("--auto-categorize")
+                    
+                    if auto_reply:
+                        args.append("--auto-reply")
+                    
+                    if auto_mark_read:
+                        args.append("--auto-mark-read")
+                    
+                    # 调用设置脚本
+                    result = self.mcp_client.call("system.run_script", {
+                        "script_name": "setup_cron.py",
+                        "args": args
+                    })
+                    
+                    return f"设置定时任务结果: {result.get('message', '成功')}"
+                except Exception as e:
+                    return f"设置定时任务失败: {str(e)}"
+            
+            # 绑定事件
+            check_auth_btn.click(
+                fn=check_gmail_auth,
+                outputs=auth_status
+            )
+            
+            setup_auth_btn.click(
+                fn=setup_gmail_auth,
+                inputs=client_secret_path,
+                outputs=auth_status
+            )
+            
+            setup_cron_btn.click(
+                fn=setup_cron_job,
+                inputs=[
+                    auto_check_interval,
+                    auto_categorize,
+                    auto_reply,
+                    auto_mark_read
+                ],
+                outputs=cron_status
             )
 
 def create_email_interface(mcp_client, config):

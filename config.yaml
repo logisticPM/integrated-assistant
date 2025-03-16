@@ -19,7 +19,7 @@ meeting:
   transcription_dir: "./data/transcriptions"
   whisper:
     model: "base"  # tiny, base, small, medium, large
-    language: "zh"  # 默认语言，可选auto
+    language: "auto"  # 默认语言，可选auto
 
 email:
   sync_interval: 300  # 秒
@@ -28,14 +28,22 @@ email:
     - name: "gmail"
       enabled: false
       credentials_file: "./credentials/gmail.json"
-    - name: "outlook"
-      enabled: false
-      credentials_file: "./credentials/outlook.json"
 
 knowledge:
   docs_dir: "./data/documents"
   chunk_size: 1000
   chunk_overlap: 200
+  embedding_model: "all-MiniLM-L6-v2"  # sentence-transformers模型名称
+  splitter_type: "smart"  # 分块器类型：simple, markdown, smart
+  supported_extensions:  # 支持的文件扩展名
+    - ".txt"
+    - ".md"
+    - ".pdf"
+    - ".docx"
+    - ".html"
+    - ".csv"
+  use_mock_embedder: false  # 是否使用模拟嵌入器（用于测试）
+  vector_search_top_k: 5  # 向量搜索返回的最大结果数
 
 db:
   sqlite_path: "./data/app.db"

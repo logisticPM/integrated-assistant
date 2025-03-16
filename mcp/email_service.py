@@ -10,13 +10,8 @@ import json
 import time
 import logging
 import sqlite3
-import email
-import imaplib
-import smtplib
 import re
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.header import decode_header
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
 # 配置日志
@@ -39,16 +34,7 @@ class EmailService:
         """
         self.config = config
         self.db_path = db_path
-        self.email_dir = config["email"]["email_dir"]
-        
-        # 邮件服务器配置
-        self.imap_server = config["email"]["imap_server"]
-        self.imap_port = config["email"]["imap_port"]
-        self.smtp_server = config["email"]["smtp_server"]
-        self.smtp_port = config["email"]["smtp_port"]
-        self.email_address = config["email"]["email_address"]
-        self.email_password = config["email"]["email_password"]
-        self.use_ssl = config["email"]["use_ssl"]
+        self.email_dir = os.path.join(os.path.dirname(db_path), "emails")
         
         # 确保目录存在
         os.makedirs(self.email_dir, exist_ok=True)
@@ -81,7 +67,8 @@ class EmailService:
             priority TEXT,
             category TEXT,
             sentiment TEXT,
-            created_at REAL
+            created_at REAL,
+            project_id TEXT DEFAULT "default"
         )
         ''')
         
@@ -111,104 +98,6 @@ class EmailService:
         
         conn.commit()
         conn.close()
-    
-    def _decode_str(self, s):
-        """解码邮件主题等字符串"""
-        if not s:
-            return ""
-        
-        decoded_parts = []
-        for part, encoding in decode_header(s):
-            if isinstance(part, bytes):
-                if encoding:
-                    try:
-                        decoded_parts.append(part.decode(encoding))
-                    except:
-                        decoded_parts.append(part.decode('utf-8', errors='replace'))
-                else:
-                    decoded_parts.append(part.decode('utf-8', errors='replace'))
-            else:
-                decoded_parts.append(part)
-        
-        return ''.join(decoded_parts)
-    
-    def _get_email_body(self, msg):
-        """获取邮件正文"""
-        text_body = ""
-        html_body = ""
-        attachments = []
-        
-        if msg.is_multipart():
-            for part in msg.walk():
-                content_type = part.get_content_type()
-                content_disposition = str(part.get("Content-Disposition"))
-                
-                # 跳过邮件签名等部分
-                if content_type == "multipart/alternative":
-                    continue
-                
-                # 处理附件
-                if "attachment" in content_disposition:
-                    filename = part.get_filename()
-                    if filename:
-                        filename = self._decode_str(filename)
-                        attachments.append({
-                            "filename": filename,
-                            "content_type": content_type,
-                            "size": len(part.get_payload(decode=True)),
-                            "data": part.get_payload(decode=True)
-                        })
-                    continue
-                
-                # 处理正文
-                try:
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        charset = part.get_content_charset() or 'utf-8'
-                        try:
-                            decoded_payload = payload.decode(charset, errors='replace')
-                        except:
-                            decoded_payload = payload.decode('utf-8', errors='replace')
-                        
-                        if content_type == "text/plain":
-                            text_body += decoded_payload
-                        elif content_type == "text/html":
-                            html_body += decoded_payload
-                except:
-                    continue
-        else:
-            # 非多部分邮件
-            content_type = msg.get_content_type()
-            payload = msg.get_payload(decode=True)
-            if payload:
-                charset = msg.get_content_charset() or 'utf-8'
-                try:
-                    decoded_payload = payload.decode(charset, errors='replace')
-                except:
-                    decoded_payload = payload.decode('utf-8', errors='replace')
-                
-                if content_type == "text/plain":
-                    text_body = decoded_payload
-                elif content_type == "text/html":
-                    html_body = decoded_payload
-        
-        return text_body, html_body, attachments
-    
-    def _save_attachment(self, email_id, attachment):
-        """保存邮件附件"""
-        filename = attachment["filename"]
-        safe_filename = re.sub(r'[\\/*?:"<>|]', "_", filename)
-        
-        # 创建附件目录
-        attachment_dir = os.path.join(self.email_dir, "attachments", email_id)
-        os.makedirs(attachment_dir, exist_ok=True)
-        
-        # 保存附件
-        local_path = os.path.join(attachment_dir, safe_filename)
-        with open(local_path, "wb") as f:
-            f.write(attachment["data"])
-        
-        return local_path
     
     def _analyze_email(self, subject, body):
         """分析邮件内容（分类、优先级、情感）"""
@@ -246,6 +135,47 @@ class EmailService:
         
         return category, priority, sentiment
     
+    def _detect_project(self, subject, body):
+        """
+        从邮件内容中检测项目
+        
+        Args:
+            subject: 邮件主题
+            body: 邮件正文
+        
+        Returns:
+            项目ID
+        """
+        try:
+            # 使用MCP调用项目服务获取项目列表
+            from mcp.client import MCPClient
+            mcp_client = MCPClient("127.0.0.1", self.config["mcp"]["server_port"])
+            
+            # 获取项目列表
+            projects = mcp_client.call("chatbot.list_projects")
+            
+            if not projects or not isinstance(projects, list):
+                return "default"
+            
+            # 按名称长度降序排序，优先匹配长名称
+            projects.sort(key=lambda x: len(x.get("name", "")), reverse=True)
+            
+            # 合并主题和正文进行检测
+            content = f"{subject}\n{body}"
+            
+            for project in projects:
+                project_name = project.get("name", "")
+                project_id = project.get("id", "")
+                
+                # 检查项目名称是否出现在内容中
+                if project_name and project_name.lower() in content.lower():
+                    return project_id
+            
+            return "default"
+        except Exception as e:
+            logger.error(f"检测项目失败: {str(e)}")
+            return "default"
+    
     def sync_emails(self, folder: str = "INBOX", limit: int = 50) -> Dict[str, Any]:
         """
         同步邮件
@@ -258,119 +188,114 @@ class EmailService:
             同步结果
         """
         try:
-            # 连接IMAP服务器
-            if self.use_ssl:
-                mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
-            else:
-                mail = imaplib.IMAP4(self.imap_server, self.imap_port)
+            # 使用MCP调用Gmail服务获取邮件
+            from mcp.client import MCPClient
+            mcp_client = MCPClient("127.0.0.1", self.config["mcp"]["server_port"])
             
-            # 登录
-            mail.login(self.email_address, self.email_password)
+            # 测试Gmail连接
+            connection_test = mcp_client.call("gmail.test_connection")
+            if not connection_test["success"]:
+                return {"success": False, "message": f"Gmail连接失败: {connection_test['message']}", "count": 0}
             
-            # 选择文件夹
-            mail.select(folder)
+            # 获取邮件列表
+            emails = mcp_client.call("gmail.list_emails", {"max_results": limit, "query": f"in:{folder}"})
+            if not emails:
+                return {"success": True, "message": "没有新邮件", "new_emails": 0}
             
-            # 搜索邮件
-            status, data = mail.search(None, "ALL")
-            if status != "OK":
-                return {"success": False, "message": "搜索邮件失败", "count": 0}
+            # 同步到数据库
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
-            # 获取邮件ID列表
-            email_ids = data[0].split()
-            
-            # 限制同步数量
-            if limit > 0 and len(email_ids) > limit:
-                email_ids = email_ids[-limit:]
-            
-            # 同步邮件
-            synced_count = 0
-            for email_id in email_ids:
-                status, data = mail.fetch(email_id, "(RFC822)")
-                if status != "OK":
+            new_count = 0
+            for email in emails:
+                # 检查邮件是否已存在
+                cursor.execute("SELECT id FROM emails WHERE message_id = ?", (email["id"],))
+                if cursor.fetchone():
                     continue
-                
-                raw_email = data[0][1]
-                msg = email.message_from_bytes(raw_email)
-                
-                # 解析邮件
-                message_id = msg.get("Message-ID", "")
-                subject = self._decode_str(msg.get("Subject", ""))
-                sender = self._decode_str(msg.get("From", ""))
-                recipients = self._decode_str(msg.get("To", ""))
-                date = msg.get("Date", "")
-                
-                # 获取邮件正文和附件
-                text_body, html_body, attachments = self._get_email_body(msg)
                 
                 # 分析邮件
-                category, priority, sentiment = self._analyze_email(subject, text_body)
+                category, priority, sentiment = self._analyze_email(email["subject"], email["body"])
                 
-                # 生成唯一ID
-                unique_id = f"email_{int(time.time())}_{message_id.replace('<', '').replace('>', '')}"
+                # 检测项目
+                project_id = self._detect_project(email["subject"], email["body"])
                 
-                # 保存到数据库
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
+                # 插入邮件
+                now = time.time()
+                cursor.execute('''
+                INSERT INTO emails (
+                    id, message_id, subject, sender, recipients, date, 
+                    body_text, body_html, has_attachments, folder, 
+                    is_read, is_flagged, is_replied, is_forwarded, 
+                    priority, category, sentiment, created_at, project_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    email["id"], email["id"], email["subject"], email["sender"], 
+                    email.get("recipients", ""), email["date"], 
+                    email["body"], "", 0, folder, 
+                    0, 0, 0, 0, 
+                    priority, category, sentiment, now, project_id
+                ))
                 
-                # 检查邮件是否已存在
-                cursor.execute("SELECT id FROM emails WHERE message_id = ?", (message_id,))
-                existing = cursor.fetchone()
+                new_count += 1
                 
-                if existing:
-                    # 邮件已存在，跳过
-                    conn.close()
-                    continue
+                # 如果是会议相关邮件，创建会议记录
+                if category == "会议":
+                    try:
+                        # 提取会议信息
+                        meeting_title = email["subject"]
+                        meeting_description = email["body"][:500] if len(email["body"]) > 500 else email["body"]
+                        
+                        # 创建会议记录
+                        mcp_client.call("meeting.create", {
+                            "title": meeting_title,
+                            "description": meeting_description,
+                            "project_id": project_id,
+                            "tags": ["email", f"sender:{email['sender']}"]
+                        })
+                        
+                        logger.info(f"从邮件创建会议记录: {meeting_title}, 项目: {project_id}")
+                    except Exception as e:
+                        logger.error(f"从邮件创建会议记录失败: {str(e)}")
                 
-                # 插入邮件记录
-                cursor.execute(
-                    """
-                    INSERT INTO emails (
-                        id, message_id, subject, sender, recipients, date, 
-                        body_text, body_html, has_attachments, folder, 
-                        is_read, is_flagged, is_replied, is_forwarded, 
-                        priority, category, sentiment, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        unique_id, message_id, subject, sender, recipients, date,
-                        text_body, html_body, 1 if attachments else 0, folder,
-                        0, 0, 0, 0,
-                        priority, category, sentiment, time.time()
-                    )
-                )
-                
-                # 保存附件
-                for attachment in attachments:
-                    local_path = self._save_attachment(unique_id, attachment)
+                # 将邮件添加到知识库
+                try:
+                    # 保存邮件内容到文件
+                    email_content = f"# {email['subject']}\n\n"
+                    email_content += f"- 发件人: {email['sender']}\n"
+                    email_content += f"- 日期: {email['date']}\n"
+                    email_content += f"- 类别: {category}\n"
+                    email_content += f"- 优先级: {priority}\n\n"
+                    email_content += f"## 正文\n\n{email['body']}\n"
                     
-                    attachment_id = f"attachment_{int(time.time())}_{attachment['filename']}"
-                    cursor.execute(
-                        """
-                        INSERT INTO email_attachments (
-                            id, email_id, filename, content_type, size, local_path, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            attachment_id, unique_id, attachment["filename"],
-                            attachment["content_type"], attachment["size"],
-                            local_path, time.time()
-                        )
-                    )
-                
-                conn.commit()
-                conn.close()
-                
-                synced_count += 1
+                    email_file_path = os.path.join(self.email_dir, f"{email['id']}.md")
+                    with open(email_file_path, "w", encoding="utf-8") as f:
+                        f.write(email_content)
+                    
+                    # 添加到知识库
+                    mcp_client.call("vector.create_document", {
+                        "title": f"邮件: {email['subject']}",
+                        "category": "email",
+                        "tags": ["email", f"sender:{email['sender']}", f"category:{category}"],
+                        "file_path": email_file_path,
+                        "project_id": project_id
+                    })
+                    
+                    logger.info(f"邮件已添加到知识库: {email['subject']}, 项目: {project_id}")
+                except Exception as e:
+                    logger.error(f"添加邮件到知识库失败: {str(e)}")
             
-            # 关闭连接
-            mail.close()
-            mail.logout()
+            conn.commit()
+            conn.close()
             
-            return {"success": True, "message": f"成功同步 {synced_count} 封邮件", "count": synced_count}
+            return {
+                "success": True, 
+                "message": f"同步完成，新增 {new_count} 封邮件", 
+                "new_emails": new_count
+            }
         
         except Exception as e:
-            logger.exception("同步邮件失败")
-            return {"success": False, "message": f"同步邮件失败: {str(e)}", "count": 0}
+            logger.exception(f"同步邮件失败: {str(e)}")
+            return {"success": False, "message": f"同步失败: {str(e)}", "new_emails": 0}
     
     def send_email(self, to: str, subject: str, body: str, html: bool = False) -> Dict[str, Any]:
         """
@@ -386,38 +311,20 @@ class EmailService:
             发送结果
         """
         try:
-            # 创建邮件
-            msg = MIMEMultipart()
-            msg["From"] = self.email_address
-            msg["To"] = to
-            msg["Subject"] = subject
+            # 使用MCP调用Gmail服务发送邮件
+            from mcp.client import MCPClient
+            mcp_client = MCPClient("127.0.0.1", self.config["mcp"]["server_port"])
             
-            # 添加正文
-            if html:
-                msg.attach(MIMEText(body, "html", "utf-8"))
-            else:
-                msg.attach(MIMEText(body, "plain", "utf-8"))
+            result = mcp_client.call("gmail.send_email", {
+                "to": to,
+                "subject": subject,
+                "body": body,
+                "html": html
+            })
             
-            # 连接SMTP服务器
-            if self.use_ssl:
-                server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port)
-            else:
-                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
-                server.starttls()
-            
-            # 登录
-            server.login(self.email_address, self.email_password)
-            
-            # 发送邮件
-            server.send_message(msg)
-            
-            # 关闭连接
-            server.quit()
-            
-            return {"success": True, "message": "邮件发送成功"}
-        
+            return result
         except Exception as e:
-            logger.exception("发送邮件失败")
+            logger.error(f"发送邮件失败: {e}")
             return {"success": False, "message": f"发送邮件失败: {str(e)}"}
     
     def list_emails(self, folder: str = None, category: str = None, 
@@ -437,75 +344,57 @@ class EmailService:
         Returns:
             邮件列表
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        sql = """
-        SELECT id, subject, sender, recipients, date, 
-               has_attachments, folder, is_read, is_flagged, 
-               priority, category, sentiment, created_at
-        FROM emails
-        """
-        
-        conditions = []
-        params = []
-        
-        if folder:
-            conditions.append("folder = ?")
-            params.append(folder)
-        
-        if category:
-            conditions.append("category = ?")
-            params.append(category)
-        
-        if priority:
-            conditions.append("priority = ?")
-            params.append(priority)
-        
-        if is_read is not None:
-            conditions.append("is_read = ?")
-            params.append(is_read)
-        
-        if search_query:
-            conditions.append("(subject LIKE ? OR body_text LIKE ? OR sender LIKE ?)")
-            search_term = f"%{search_query}%"
-            params.extend([search_term, search_term, search_term])
-        
-        if conditions:
-            sql += " WHERE " + " AND ".join(conditions)
-        
-        sql += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
-        
-        cursor.execute(sql, params)
-        results = cursor.fetchall()
-        
-        emails = []
-        for row in results:
-            (email_id, subject, sender, recipients, date, 
-             has_attachments, folder, is_read, is_flagged, 
-             priority, category, sentiment, created_at) = row
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
             
-            emails.append({
-                "id": email_id,
-                "subject": subject,
-                "sender": sender,
-                "recipients": recipients,
-                "date": date,
-                "has_attachments": bool(has_attachments),
-                "folder": folder,
-                "is_read": bool(is_read),
-                "is_flagged": bool(is_flagged),
-                "priority": priority,
-                "category": category,
-                "sentiment": sentiment,
-                "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(created_at))
-            })
-        
-        conn.close()
-        return emails
+            query = "SELECT * FROM emails"
+            conditions = []
+            params = []
+            
+            if folder:
+                conditions.append("folder = ?")
+                params.append(folder)
+            
+            if category:
+                conditions.append("category = ?")
+                params.append(category)
+            
+            if priority:
+                conditions.append("priority = ?")
+                params.append(priority)
+            
+            if is_read is not None:
+                conditions.append("is_read = ?")
+                params.append(is_read)
+            
+            if search_query:
+                conditions.append("(subject LIKE ? OR body_text LIKE ? OR sender LIKE ?)")
+                search_term = f"%{search_query}%"
+                params.extend([search_term, search_term, search_term])
+            
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            
+            query += " ORDER BY date DESC LIMIT ?"
+            params.append(limit)
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            
+            emails = []
+            for row in rows:
+                email_data = dict(row)
+                emails.append(email_data)
+            
+            conn.close()
+            return emails
+        except Exception as e:
+            logger.error(f"列出邮件失败: {e}")
+            return []
     
-    def get_email(self, email_id: str) -> Dict[str, Any]:
+    def get_email(self, email_id: str) -> Optional[Dict[str, Any]]:
         """
         获取邮件详情
         
@@ -515,79 +404,37 @@ class EmailService:
         Returns:
             邮件详情
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # 获取邮件基本信息
-        cursor.execute(
-            """
-            SELECT id, message_id, subject, sender, recipients, date, 
-                   body_text, body_html, has_attachments, folder, 
-                   is_read, is_flagged, is_replied, is_forwarded, 
-                   priority, category, sentiment, created_at
-            FROM emails WHERE id = ?
-            """,
-            (email_id,)
-        )
-        
-        result = cursor.fetchone()
-        if not result:
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT * FROM emails WHERE id = ?", (email_id,))
+            row = cursor.fetchone()
+            
+            if not row:
+                conn.close()
+                return None
+            
+            # 转换为字典
+            email = dict(row)
+            
+            # 获取标签
+            cursor.execute("SELECT tag FROM email_tags WHERE email_id = ?", (email_id,))
+            tags = [row[0] for row in cursor.fetchall()]
+            email["tags"] = tags
+            
+            # 获取附件
+            cursor.execute("SELECT * FROM email_attachments WHERE email_id = ?", (email_id,))
+            attachments = [dict(row) for row in cursor.fetchall()]
+            email["attachments"] = attachments
+            
             conn.close()
-            raise ValueError(f"邮件不存在: {email_id}")
+            return email
         
-        (email_id, message_id, subject, sender, recipients, date, 
-         body_text, body_html, has_attachments, folder, 
-         is_read, is_flagged, is_replied, is_forwarded, 
-         priority, category, sentiment, created_at) = result
-        
-        # 获取附件信息
-        cursor.execute(
-            """
-            SELECT id, filename, content_type, size, local_path
-            FROM email_attachments WHERE email_id = ?
-            """,
-            (email_id,)
-        )
-        
-        attachments = []
-        for row in cursor.fetchall():
-            attachment_id, filename, content_type, size, local_path = row
-            attachments.append({
-                "id": attachment_id,
-                "filename": filename,
-                "content_type": content_type,
-                "size": size,
-                "local_path": local_path
-            })
-        
-        # 标记为已读
-        if not is_read:
-            cursor.execute("UPDATE emails SET is_read = 1 WHERE id = ?", (email_id,))
-            conn.commit()
-        
-        conn.close()
-        
-        return {
-            "id": email_id,
-            "message_id": message_id,
-            "subject": subject,
-            "sender": sender,
-            "recipients": recipients,
-            "date": date,
-            "body_text": body_text,
-            "body_html": body_html,
-            "has_attachments": bool(has_attachments),
-            "attachments": attachments,
-            "folder": folder,
-            "is_read": bool(is_read),
-            "is_flagged": bool(is_flagged),
-            "is_replied": bool(is_replied),
-            "is_forwarded": bool(is_forwarded),
-            "priority": priority,
-            "category": category,
-            "sentiment": sentiment,
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(created_at))
-        }
+        except Exception as e:
+            logger.exception(f"获取邮件详情失败: {email_id}, {str(e)}")
+            return None
     
     def update_email_status(self, email_id: str, status_field: str, value: int) -> bool:
         """
@@ -601,18 +448,82 @@ class EmailService:
         Returns:
             是否成功
         """
-        valid_fields = ["is_read", "is_flagged", "is_replied", "is_forwarded"]
-        if status_field not in valid_fields:
-            raise ValueError(f"无效的状态字段: {status_field}")
+        try:
+            # 验证状态字段
+            valid_fields = ["is_read", "is_flagged", "is_replied", "is_forwarded"]
+            if status_field not in valid_fields:
+                logger.error(f"无效的状态字段: {status_field}")
+                return False
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 更新状态
+            cursor.execute(f"UPDATE emails SET {status_field} = ? WHERE id = ?", (value, email_id))
+            conn.commit()
+            conn.close()
+            
+            return True
+        except Exception as e:
+            logger.error(f"更新邮件状态失败: {e}")
+            return False
+    
+    def update_email_project(self, email_id: str, project_id: str) -> bool:
+        """
+        更新邮件所属项目
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        Args:
+            email_id: 邮件ID
+            project_id: 项目ID
         
-        cursor.execute(f"UPDATE emails SET {status_field} = ? WHERE id = ?", (value, email_id))
-        conn.commit()
-        conn.close()
+        Returns:
+            是否成功
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 更新邮件项目
+            cursor.execute(
+                "UPDATE emails SET project_id = ? WHERE id = ?",
+                (project_id, email_id)
+            )
+            
+            if cursor.rowcount == 0:
+                conn.close()
+                return False
+            
+            conn.commit()
+            conn.close()
+            
+            # 更新知识库中的邮件文档
+            try:
+                from mcp.client import MCPClient
+                mcp_client = MCPClient("127.0.0.1", self.config["mcp"]["server_port"])
+                
+                # 查询知识库中的邮件文档
+                docs = mcp_client.call("vector.search_documents", {
+                    "query": "",
+                    "category": "email",
+                    "tags": [f"email_id:{email_id}"]
+                })
+                
+                if docs and isinstance(docs, list) and len(docs) > 0:
+                    # 更新文档项目
+                    for doc in docs:
+                        # 这里假设向量服务有更新文档项目的方法
+                        mcp_client.call("vector.update_document_project", {
+                            "document_id": doc["id"],
+                            "project_id": project_id
+                        })
+            except Exception as e:
+                logger.error(f"更新知识库中的邮件项目失败: {str(e)}")
+            
+            return True
         
-        return True
+        except Exception as e:
+            logger.exception(f"更新邮件项目失败: {email_id}, {str(e)}")
+            return False
     
     def delete_email(self, email_id: str) -> bool:
         """
@@ -624,29 +535,26 @@ class EmailService:
         Returns:
             是否成功
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # 删除附件
-        cursor.execute("SELECT local_path FROM email_attachments WHERE email_id = ?", (email_id,))
-        for row in cursor.fetchall():
-            local_path = row[0]
-            if os.path.exists(local_path):
-                os.remove(local_path)
-        
-        # 删除附件记录
-        cursor.execute("DELETE FROM email_attachments WHERE email_id = ?", (email_id,))
-        
-        # 删除标签
-        cursor.execute("DELETE FROM email_tags WHERE email_id = ?", (email_id,))
-        
-        # 删除邮件
-        cursor.execute("DELETE FROM emails WHERE id = ?", (email_id,))
-        
-        conn.commit()
-        conn.close()
-        
-        return True
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 删除附件
+            cursor.execute("DELETE FROM email_attachments WHERE email_id = ?", (email_id,))
+            
+            # 删除标签
+            cursor.execute("DELETE FROM email_tags WHERE email_id = ?", (email_id,))
+            
+            # 删除邮件
+            cursor.execute("DELETE FROM emails WHERE id = ?", (email_id,))
+            
+            conn.commit()
+            conn.close()
+            
+            return True
+        except Exception as e:
+            logger.error(f"删除邮件失败: {e}")
+            return False
     
     def analyze_emails(self, limit: int = 100) -> Dict[str, Any]:
         """
@@ -658,43 +566,42 @@ class EmailService:
         Returns:
             统计结果
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # 获取总邮件数
-        cursor.execute("SELECT COUNT(*) FROM emails")
-        total_count = cursor.fetchone()[0]
-        
-        # 获取未读邮件数
-        cursor.execute("SELECT COUNT(*) FROM emails WHERE is_read = 0")
-        unread_count = cursor.fetchone()[0]
-        
-        # 获取类别分布
-        cursor.execute("SELECT category, COUNT(*) FROM emails GROUP BY category")
-        categories = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        # 获取优先级分布
-        cursor.execute("SELECT priority, COUNT(*) FROM emails GROUP BY priority")
-        priorities = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        # 获取情感分布
-        cursor.execute("SELECT sentiment, COUNT(*) FROM emails GROUP BY sentiment")
-        sentiments = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        # 获取发件人分布
-        cursor.execute("SELECT sender, COUNT(*) FROM emails GROUP BY sender ORDER BY COUNT(*) DESC LIMIT 10")
-        senders = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        conn.close()
-        
-        return {
-            "total_count": total_count,
-            "unread_count": unread_count,
-            "categories": categories,
-            "priorities": priorities,
-            "sentiments": sentiments,
-            "top_senders": senders
-        }
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 获取最近的邮件
+            cursor.execute("SELECT * FROM emails ORDER BY date DESC LIMIT ?", (limit,))
+            rows = cursor.fetchall()
+            
+            # 统计分类
+            cursor.execute("SELECT category, COUNT(*) FROM emails GROUP BY category")
+            categories = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # 统计优先级
+            cursor.execute("SELECT priority, COUNT(*) FROM emails GROUP BY priority")
+            priorities = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # 统计情感
+            cursor.execute("SELECT sentiment, COUNT(*) FROM emails GROUP BY sentiment")
+            sentiments = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # 统计发件人
+            cursor.execute("SELECT sender, COUNT(*) FROM emails GROUP BY sender ORDER BY COUNT(*) DESC LIMIT 10")
+            senders = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            conn.close()
+            
+            return {
+                "total": len(rows),
+                "categories": categories,
+                "priorities": priorities,
+                "sentiments": sentiments,
+                "top_senders": senders
+            }
+        except Exception as e:
+            logger.error(f"分析邮件失败: {e}")
+            return {"total": 0}
 
 def register_email_service(server):
     """
@@ -703,16 +610,18 @@ def register_email_service(server):
     Args:
         server: MCP服务器实例
     """
-    # 创建邮件服务实例
-    service = EmailService(server.config, server.config["db"]["sqlite_path"])
+    config = server.config
+    db_path = config["db"]["sqlite_path"]
+    email_service = EmailService(config, db_path)
     
-    # 注册方法
-    server.register_module("email", {
-        "sync": service.sync_emails,
-        "send": service.send_email,
-        "list": service.list_emails,
-        "get": service.get_email,
-        "update_status": service.update_email_status,
-        "delete": service.delete_email,
-        "analyze": service.analyze_emails
-    })
+    # 注册服务方法
+    server.register_method("email.sync", email_service.sync_emails)
+    server.register_method("email.send", email_service.send_email)
+    server.register_method("email.list", email_service.list_emails)
+    server.register_method("email.get", email_service.get_email)
+    server.register_method("email.update_status", email_service.update_email_status)
+    server.register_method("email.update_project", email_service.update_email_project)
+    server.register_method("email.delete", email_service.delete_email)
+    server.register_method("email.analyze", email_service.analyze_emails)
+    
+    logger.info("Email Service registered")

@@ -19,6 +19,11 @@ from mcp.transcription import register_transcription_service
 from mcp.llm_adapter import register_llm_service
 from mcp.vector_service import register_vector_service
 from mcp.email_service import register_email_service
+from mcp.gmail_auth import register_gmail_auth_service
+from mcp.chatbot_service import register_chatbot_service
+from mcp.gmail_service import register_gmail_service
+from mcp.email_analysis import register_email_analysis_service
+from mcp.meeting_service import register_meeting_service
 
 # 配置日志
 logging.basicConfig(
@@ -330,6 +335,11 @@ def start_mcp_server(config: Dict[str, Any]) -> threading.Thread:
     register_llm_service(server)
     register_vector_service(server)
     register_email_service(server)
+    register_gmail_auth_service(server)
+    register_chatbot_service(server)
+    register_gmail_service(server)
+    register_email_analysis_service(server)
+    register_meeting_service(server)
     
     # 创建服务器线程
     server_thread = threading.Thread(
