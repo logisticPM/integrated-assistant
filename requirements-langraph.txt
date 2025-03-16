@@ -5,8 +5,8 @@ langchain-openai==0.0.5
 langchain-anthropic==0.1.1
 langchain-experimental==0.0.47
 langchain-text-splitters==0.0.1
-langchain-chroma==0.0.1
-langraph==0.0.8
+langchain-chroma>=0.1.2
+langgraph==0.0.8
 pydantic>=2.0.0,<3.0.0
 fastapi>=0.95.0
 uvicorn>=0.22.0
