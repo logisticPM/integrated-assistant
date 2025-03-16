@@ -283,7 +283,25 @@ def create_transcription_component(config: Dict[str, Any]) -> MCPComponent:
     Returns:
         转录组件实例
     """
-    # 首先尝试使用 AnythingLLM API 进行转录
+    # 首先尝试使用 Whisper.cpp 组件（针对 Snapdragon XElite 优化）
+    try:
+        whisper_config = config.get("meeting", {}).get("whisper", {})
+        use_cpp = whisper_config.get("use_cpp", False)
+        
+        if use_cpp:
+            # 尝试创建 Whisper.cpp 组件
+            from mcp.langraph.whisper_cpp_component import create_whisper_cpp_component
+            whisper_cpp = create_whisper_cpp_component(config)
+            
+            if whisper_cpp:
+                logger.info("使用 Whisper.cpp 组件（针对 Snapdragon XElite 优化）")
+                return whisper_cpp
+            else:
+                logger.warning("Whisper.cpp 组件创建失败，尝试其他转录方式")
+    except Exception as e:
+        logger.error(f"创建 Whisper.cpp 组件失败: {str(e)}")
+    
+    # 其次尝试使用 AnythingLLM API 进行转录
     try:
         # 检查是否启用了 AnythingLLM
         anythingllm_config = config.get("anythingllm", {})
@@ -304,7 +322,7 @@ def create_transcription_component(config: Dict[str, Any]) -> MCPComponent:
     except Exception as e:
         logger.error(f"创建 AnythingLLM 转录组件失败: {str(e)}")
     
-    # 其次检查是否启用了本地 Whisper 模型
+    # 再次检查是否启用了本地 Whisper 模型
     try:
         whisper_config = config.get("meeting", {}).get("whisper", {})
         use_local = whisper_config.get("use_local", False)
