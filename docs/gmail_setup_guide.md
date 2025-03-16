@@ -43,16 +43,90 @@
 
 ## 步骤 5: 配置集成助手
 
-1. 确保集成助手已正确安装
-2. 运行 Gmail 设置脚本，指定客户端密钥文件的路径：
+集成助手现在提供多种方式配置 Gmail 凭证，选择以下任一方式：
+
+### 方式一：使用客户端密钥文件
 
 ```bash
 python scripts/setup_gmail.py --client-secret /path/to/your/client_secret.json
 ```
 
-3. 脚本将启动浏览器窗口，引导你完成 Google 授权流程
-4. 按照浏览器中的提示登录你的 Google 账户并授权应用访问你的 Gmail
-5. 授权成功后，浏览器将显示"授权成功"页面，你可以关闭该页面
+### 方式二：使用环境变量
+
+设置以下环境变量，然后运行设置脚本：
+
+```bash
+# Windows PowerShell
+$env:GMAIL_SECRET = '{"installed":{"client_id":"YOUR_CLIENT_ID.apps.googleusercontent.com","project_id":"your-project-id","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"YOUR_CLIENT_SECRET","redirect_uris":["http://localhost"]}}'
+
+# 然后运行
+python scripts/setup_gmail.py
+```
+
+```bash
+# Linux/macOS
+export GMAIL_SECRET='{"installed":{"client_id":"YOUR_CLIENT_ID.apps.googleusercontent.com","project_id":"your-project-id","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"YOUR_CLIENT_SECRET","redirect_uris":["http://localhost"]}}'
+
+# 然后运行
+python scripts/setup_gmail.py
+```
+
+### 方式三：直接传递密钥内容
+
+```bash
+python scripts/setup_gmail.py --client-secret-content '{"installed":{"client_id":"YOUR_CLIENT_ID.apps.googleusercontent.com","project_id":"your-project-id","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"YOUR_CLIENT_SECRET","redirect_uris":["http://localhost"]}}'
+```
+
+## 客户端密钥格式说明
+
+无论使用哪种方式，确保你的客户端密钥 JSON 格式正确：
+
+```json
+{
+  "installed": {
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "project_id": "your-project-id",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_secret": "YOUR_CLIENT_SECRET",
+    "redirect_uris": ["http://localhost"]
+  }
+}
+```
+
+**重要提示**：密钥必须包含 `"installed"` 对象，这表明它是一个已安装应用程序的凭证。如果格式不正确，会出现 "Client secrets must be for a web or installed app" 错误。
+
+## 在其他电脑上配置
+
+如果你需要在其他电脑上配置 Gmail 集成，可以：
+
+1. 将你的客户端密钥文件复制到新电脑的 `data/credentials/secrets.json` 路径
+2. 或者使用环境变量 `GMAIL_SECRET` 设置密钥内容
+3. 或者使用命令行参数 `--client-secret` 或 `--client-secret-content` 指定密钥
+
+首次运行时，会打开浏览器窗口要求授权访问你的 Gmail 账户。授权后，令牌会保存到 `data/credentials/token.json` 文件中。
+
+## 其他命令行选项
+
+```bash
+# 指定凭证目录
+python scripts/setup_gmail.py --credentials-dir /custom/path/to/credentials
+
+# 指定OAuth端口
+python scripts/setup_gmail.py --port 8080
+
+# 直接提供令牌内容（适用于已有令牌的情况）
+python scripts/setup_gmail.py --token-content '{"token":"your-token-content",...}'
+```
+
+## 在部署脚本中跳过 Gmail 设置
+
+如果你不需要 Gmail 集成，可以在运行部署脚本时添加 `--skip-gmail` 参数：
+
+```bash
+python scripts/setup_all_with_langraph.py --use-langraph --skip-gmail
+```
 
 ## 步骤 6: 验证设置
 

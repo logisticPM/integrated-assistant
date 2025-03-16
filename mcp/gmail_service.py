@@ -67,13 +67,17 @@ class GmailService:
         获取Gmail API凭证
         
         Args:
-            gmail_token: Gmail令牌内容
-            gmail_secret: Gmail密钥内容
+            gmail_token: Gmail令牌内容，如果为None则尝试从环境变量GMAIL_TOKEN获取
+            gmail_secret: Gmail密钥内容，如果为None则尝试从环境变量GMAIL_SECRET获取
         
         Returns:
             凭证对象
         """
         creds = None
+        
+        # 从环境变量获取凭证（如果参数为None）
+        gmail_token = gmail_token or os.getenv("GMAIL_TOKEN")
+        gmail_secret = gmail_secret or os.getenv("GMAIL_SECRET")
         
         # 如果提供了令牌或密钥，则保存到文件
         if gmail_token:
@@ -93,6 +97,13 @@ class GmailService:
             if creds and creds.expired and creds.refresh_token and creds.has_scopes(_SCOPES):
                 creds.refresh(Request())
             else:
+                # 检查密钥文件是否存在
+                if not os.path.exists(self.secrets_path):
+                    raise FileNotFoundError(
+                        f"未找到Gmail API密钥文件: {self.secrets_path}。"
+                        f"请确保该文件存在，或通过GMAIL_SECRET环境变量提供密钥内容。"
+                    )
+                
                 # 启动OAuth流程
                 flow = InstalledAppFlow.from_client_secrets_file(self.secrets_path, _SCOPES)
                 creds = flow.run_local_server(port=self.auth_port)
