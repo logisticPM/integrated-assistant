@@ -1,0 +1,47 @@
+app:
+  title: "集成助手"
+  theme: "default"
+  debug: false
+
+llm:
+  model: "local"  # local, openai, etc.
+  model_path: "./models/llm"
+  embedding_model: "local"
+  embedding_model_path: "./models/embedding"
+  # AnythingLLM集成配置
+  anything_llm:
+    enabled: true
+    api_url: "http://localhost:3001/api"
+    api_key: ""  # 如需设置API密钥，请在此处填写
+
+meeting:
+  audio_dir: "./data/audio"
+  transcription_dir: "./data/transcriptions"
+  whisper:
+    model: "base"  # tiny, base, small, medium, large
+    language: "zh"  # 默认语言，可选auto
+
+email:
+  sync_interval: 300  # 秒
+  max_emails: 1000
+  providers:
+    - name: "gmail"
+      enabled: false
+      credentials_file: "./credentials/gmail.json"
+    - name: "outlook"
+      enabled: false
+      credentials_file: "./credentials/outlook.json"
+
+knowledge:
+  docs_dir: "./data/documents"
+  chunk_size: 1000
+  chunk_overlap: 200
+
+db:
+  sqlite_path: "./data/app.db"
+  vector_db_path: "./data/vector_db"
+
+mcp:
+  server_host: "127.0.0.1"
+  server_port: 5000
+  max_workers: 4
