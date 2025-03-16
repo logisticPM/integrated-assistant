@@ -9,6 +9,8 @@ import os
 import json
 import time
 import logging
+import requests
+import base64
 from typing import Dict, Any, List
 import sqlite3
 from pathlib import Path
@@ -40,6 +42,11 @@ class TranscriptionService:
         self.whisper_model = config["meeting"]["whisper"]["model"]
         self.whisper_language = config["meeting"]["whisper"]["language"]
         
+        # AnythingLLM API 配置
+        self.anything_llm_enabled = config["llm"]["anything_llm"]["enabled"]
+        self.anything_llm_api_url = config["llm"]["anything_llm"]["api_url"]
+        self.anything_llm_api_key = config["llm"]["anything_llm"]["api_key"]
+        
         # 确保目录存在
         os.makedirs(self.audio_dir, exist_ok=True)
         os.makedirs(self.transcription_dir, exist_ok=True)
@@ -47,24 +54,43 @@ class TranscriptionService:
         # 初始化数据库
         self._init_db()
         
-        # 检查Whisper是否已安装
-        self.whisper_available = self._check_whisper()
-        if not self.whisper_available:
-            logger.warning("Whisper未安装，将使用模拟转录。请运行scripts/setup_whisper.py安装Whisper")
+        # 检查转录服务可用性
+        self.api_transcription_available = self._check_api_transcription()
+        self.whisper_available = False  # 不再使用本地 Whisper
+        
+        if not self.api_transcription_available:
+            logger.warning("AnythingLLM API 转录服务不可用，将使用模拟转录")
+    
+    def _check_api_transcription(self):
+        """检查 AnythingLLM API 转录服务是否可用"""
+        if not self.anything_llm_enabled:
+            return False
+            
+        try:
+            # 检查 AnythingLLM API 是否可用
+            headers = {}
+            if self.anything_llm_api_key:
+                headers["x-api-key"] = self.anything_llm_api_key
+                
+            response = requests.get(
+                f"{self.anything_llm_api_url}/health",
+                headers=headers,
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                logger.info("AnythingLLM API 转录服务可用")
+                return True
+            else:
+                logger.warning(f"AnythingLLM API 不可用，状态码: {response.status_code}")
+                return False
+        except Exception as e:
+            logger.warning(f"检查 AnythingLLM API 时出错: {str(e)}")
+            return False
     
     def _check_whisper(self):
-        """检查Whisper是否已安装"""
-        try:
-            # 检查whisper模块是否可用
-            whisper_spec = importlib.util.find_spec("whisper")
-            if whisper_spec is None:
-                return False
-            
-            # 尝试导入whisper
-            import whisper
-            return True
-        except ImportError:
-            return False
+        """检查Whisper是否已安装 (已废弃，保留兼容性)"""
+        return False  # 不再使用本地 Whisper
     
     def _init_db(self):
         """初始化数据库表"""
@@ -140,12 +166,15 @@ class TranscriptionService:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("SELECT meeting_id, audio_path, output_path FROM transcription_tasks WHERE id = ?", (task_id,))
-        result = cursor.fetchone()
+        cursor.execute(
+            "SELECT meeting_id, audio_path, output_path FROM transcription_tasks WHERE id = ?",
+            (task_id,)
+        )
         
+        result = cursor.fetchone()
         if not result:
+            logger.error(f"找不到转录任务: {task_id}")
             conn.close()
-            logger.error(f"任务不存在: {task_id}")
             return
         
         meeting_id, audio_path, output_path = result
@@ -161,13 +190,13 @@ class TranscriptionService:
         try:
             logger.info(f"开始转录任务: {task_id}, 音频: {audio_path}")
             
-            # 检查是否可以使用Whisper
-            if self.whisper_available:
-                # 使用Whisper进行转录
-                transcription_result = self._transcribe_with_whisper(audio_path)
+            # 检查是否可以使用 AnythingLLM API 进行转录
+            if self.api_transcription_available:
+                # 使用 AnythingLLM API 进行转录
+                transcription_result = self._transcribe_with_api(audio_path)
             else:
                 # 使用模拟转录
-                logger.warning("使用模拟转录（Whisper未安装）")
+                logger.warning("使用模拟转录（AnythingLLM API 不可用）")
                 transcription_result = self._mock_transcription(task_id, meeting_id, audio_path)
             
             # 添加任务和会议信息
@@ -224,9 +253,9 @@ class TranscriptionService:
             conn.commit()
             conn.close()
     
-    def _transcribe_with_whisper(self, audio_path: str) -> Dict[str, Any]:
+    def _transcribe_with_api(self, audio_path: str) -> Dict[str, Any]:
         """
-        使用Whisper进行转录
+        使用 AnythingLLM API 进行转录
         
         Args:
             audio_path: 音频文件路径
@@ -234,27 +263,49 @@ class TranscriptionService:
         Returns:
             转录结果
         """
-        import whisper
+        # 读取音频文件
+        with open(audio_path, "rb") as audio_file:
+            audio_data = audio_file.read()
         
-        # 加载模型
-        logger.info(f"加载Whisper模型: {self.whisper_model}")
-        model = whisper.load_model(self.whisper_model)
+        # 将音频数据编码为 base64
+        audio_base64 = base64.b64encode(audio_data).decode("utf-8")
         
-        # 设置语言参数
-        language = None if self.whisper_language == "auto" else self.whisper_language
+        # 准备请求数据
+        headers = {
+            "Content-Type": "application/json"
+        }
         
-        # 执行转录
-        logger.info(f"开始转录音频: {audio_path}")
+        if self.anything_llm_api_key:
+            headers["x-api-key"] = self.anything_llm_api_key
+        
+        data = {
+            "audio": audio_base64,
+            "model": self.whisper_model,
+            "language": None if self.whisper_language == "auto" else self.whisper_language
+        }
+        
+        # 发送请求到 AnythingLLM API
+        logger.info(f"开始使用 AnythingLLM API 转录音频: {audio_path}")
         start_time = time.time()
         
-        # 使用Whisper进行转录
-        result = model.transcribe(
-            audio_path,
-            language=language,
-            verbose=True
+        response = requests.post(
+            f"{self.anything_llm_api_url}/whisper/transcribe",
+            headers=headers,
+            json=data,
+            timeout=300  # 较长的超时时间，因为转录可能需要一些时间
         )
         
         end_time = time.time()
+        
+        # 检查响应
+        if response.status_code != 200:
+            error_msg = f"API 转录失败，状态码: {response.status_code}, 响应: {response.text}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        
+        # 解析响应
+        result = response.json()
+        
         logger.info(f"转录完成，耗时: {end_time - start_time:.2f}秒")
         
         # 格式化结果
@@ -271,7 +322,7 @@ class TranscriptionService:
     
     def _mock_transcription(self, task_id: str, meeting_id: str, audio_path: str) -> Dict[str, Any]:
         """
-        模拟转录（当Whisper不可用时使用）
+        模拟转录（当 AnythingLLM API 不可用时使用）
         
         Args:
             task_id: 任务ID

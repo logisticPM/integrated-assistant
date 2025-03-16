@@ -109,6 +109,41 @@ python -m mcp.server
 python -m frontend.app
 ```
 
+## Troubleshooting
+
+### Common Installation Issues
+
+#### Missing Dependencies
+If you encounter errors like `ModuleNotFoundError: No module named 'flask'`, ensure you've installed all required dependencies:
+
+```powershell
+pip install -r requirements.txt
+```
+
+#### Windows-Specific Issues
+- **Path Separators**: Make sure to use backslashes (`\`) in file paths when running commands on Windows.
+- **Permission Issues**: Try running PowerShell or Command Prompt as Administrator if you encounter permission errors.
+- **Long Path Errors**: Windows has a default path length limit. If you encounter path-related errors, consider installing the project in a directory with a shorter path.
+
+#### Whisper Installation Issues
+If you encounter issues with Whisper installation:
+
+```powershell
+# Install Whisper dependencies separately
+pip install torch
+pip install openai-whisper
+pip install ffmpeg-python
+
+# Make sure ffmpeg is installed and in your PATH
+# You can download it from: https://ffmpeg.org/download.html
+```
+
+#### Server Startup Errors
+If the server fails to start:
+1. Check if the port is already in use by another application
+2. Verify that all dependencies are installed
+3. Check the logs for specific error messages
+
 ## Configuration Guide
 
 ### Whisper Speech Transcription Configuration
@@ -163,6 +198,63 @@ email:
 ```
 
 For Gmail setup, follow the instructions in `docs/gmail_setup_guide.md`.
+
+## 语音转录功能
+
+集成助手支持语音转录功能，可以将会议录音转换为文本。系统提供两种转录方式：
+
+### 方式一：使用 AnythingLLM API（推荐）
+
+这种方式不需要在本地安装 Whisper，而是通过 AnythingLLM 的 API 进行转录，更适合 Windows 用户。
+
+1. 确保您已经在 `config.yaml` 中配置了 AnythingLLM API：
+
+```yaml
+llm:
+  anything_llm:
+    enabled: true
+    api_url: "http://localhost:3001/api"  # 替换为您的 AnythingLLM 服务地址
+    api_key: "your_api_key_here"          # 如果需要，添加您的 API 密钥
+```
+
+2. 确保 AnythingLLM 服务正在运行，并且可以访问 Whisper API。
+
+### 方式二：本地安装 Whisper（高级用户）
+
+如果您希望在本地运行 Whisper 而不依赖外部 API，可以按照以下步骤安装：
+
+1. 运行 Whisper 安装脚本：
+
+```bash
+python scripts/setup_whisper.py
+```
+
+2. 安装过程中，您可以选择 Whisper 模型的大小（tiny、base、small、medium、large）。
+
+> **注意**：在 Windows 系统上安装 Whisper 可能会遇到一些问题，特别是在 Windows Store 版本的 Python 中。如果遇到问题，建议使用方式一（AnythingLLM API）。
+
+## 配置说明
+
+### 语音转录配置
+
+在 `config.yaml` 文件中，您可以配置语音转录相关参数：
+
+```yaml
+meeting:
+  whisper:
+    model: "base"  # 模型大小：tiny, base, small, medium, large
+    language: "auto"  # 语言设置：auto 或特定语言代码（如 "zh"、"en"）
+```
+
+### AnythingLLM API 配置
+
+```yaml
+llm:
+  anything_llm:
+    enabled: true  # 是否启用 AnythingLLM API
+    api_url: "http://localhost:3001/api"  # AnythingLLM API 地址
+    api_key: ""  # API 密钥（如果需要）
+```
 
 ## Usage
 

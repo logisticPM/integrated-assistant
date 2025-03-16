@@ -14,6 +14,8 @@ import argparse
 import webbrowser
 import time
 from pathlib import Path
+import yaml
+import requests
 
 # Configure logging
 logging.basicConfig(
@@ -26,11 +28,51 @@ logger = logging.getLogger("start")
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 
 def check_whisper_installation():
-    """Check if Whisper is installed"""
+    """检查 Whisper 服务是否可用"""
     try:
-        import whisper
-        return True
-    except ImportError:
+        # 加载配置
+        config_path = os.path.join(ROOT_DIR, "config.yaml")
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        
+        # 检查 AnythingLLM API 配置
+        anything_llm_enabled = config["llm"]["anything_llm"]["enabled"]
+        anything_llm_api_url = config["llm"]["anything_llm"]["api_url"]
+        anything_llm_api_key = config["llm"]["anything_llm"]["api_key"]
+        
+        if not anything_llm_enabled:
+            print("Note: AnythingLLM API 未启用，语音转录将使用模拟实现")
+            print("For full speech transcription functionality, enable AnythingLLM API in config.yaml")
+            return False
+        
+        # 检查 AnythingLLM API 是否可用
+        try:
+            headers = {}
+            if anything_llm_api_key:
+                headers["x-api-key"] = anything_llm_api_key
+                
+            response = requests.get(
+                f"{anything_llm_api_url}/health",
+                headers=headers,
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                return True
+            else:
+                print(f"Note: AnythingLLM API 不可用，状态码: {response.status_code}")
+                print("Note: Speech transcription will use simulated implementation")
+                print(f"For full speech transcription functionality, ensure AnythingLLM API is running at {anything_llm_api_url}")
+                return False
+        except Exception as e:
+            print(f"Note: 检查 AnythingLLM API 时出错: {e}")
+            print("Note: Speech transcription will use simulated implementation")
+            print(f"For full speech transcription functionality, ensure AnythingLLM API is running at {anything_llm_api_url}")
+            return False
+    except Exception as e:
+        print(f"Warning: Error checking Whisper service: {e}")
+        print("Note: Speech transcription will use simulated implementation")
+        print("For full speech transcription functionality, configure AnythingLLM API in config.yaml")
         return False
 
 def main():
@@ -54,9 +96,7 @@ def main():
     
     # Check Whisper installation
     if not check_whisper_installation():
-        logger.warning("Whisper not installed, speech transcription may be limited")
-        print("\nNote: Whisper is not installed, speech transcription will use simulated implementation")
-        print("For full speech transcription functionality, run: python scripts\\setup_whisper.py\n")
+        logger.warning("AnythingLLM API not available, speech transcription may be limited")
     
     # Start server
     logger.info(f"Starting integrated assistant service at: {args.host}:{args.port}")
