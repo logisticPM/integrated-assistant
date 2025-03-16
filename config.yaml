@@ -20,6 +20,7 @@ meeting:
   whisper:
     model: "base"  # tiny, base, small, medium, large
     language: "auto"  # 默认语言，可选auto
+    use_onnx: true  # 是否使用 ONNX 运行时版本的 Whisper
 
 email:
   sync_interval: 300  # 秒

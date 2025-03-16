@@ -213,48 +213,41 @@ For Gmail setup, follow the instructions in `docs/gmail_setup_guide.md`.
 llm:
   anything_llm:
     enabled: true
-    api_url: "http://localhost:3001"  # AnythingLLM API URL
+    api_url: "http://localhost:3001"  # AnythingLLM API 地址
     api_key: "your_api_key_here"          # 如果需要，添加您的 API 密钥
 ```
 
 2. 确保 AnythingLLM 服务正在运行，并且可以访问 Whisper API。
 
-### 方式二：本地安装 Whisper（高级用户）
+### 方式二：Whisper ONNX 本地转录
 
-如果您希望在本地运行 Whisper 而不依赖外部 API，可以按照以下步骤安装：
+使用基于 ONNX 运行时的 Whisper 模型进行本地转录，性能更好，安装更简单。
 
-1. 运行 Whisper 安装脚本：
-
-```bash
-python scripts/setup_whisper.py
-```
-
-2. 安装过程中，您可以选择 Whisper 模型的大小（tiny、base、small、medium、large）。
-
-> **注意**：在 Windows 系统上安装 Whisper 可能会遇到一些问题，特别是在 Windows Store 版本的 Python 中。如果遇到问题，建议使用方式一（AnythingLLM API）。
-
-## 配置说明
-
-### 语音转录配置
-
-在 `config.yaml` 文件中，您可以配置语音转录相关参数：
+在 `config.yaml` 中配置：
 
 ```yaml
 meeting:
   whisper:
-    model: "base"  # 模型大小：tiny, base, small, medium, large
-    language: "auto"  # 语言设置：auto 或特定语言代码（如 "zh"、"en"）
+    model: "base"  # 目前仅支持 base 模型
+    language: "auto"  # 或指定语言代码
+    use_onnx: true  # 启用 ONNX 运行时版本
 ```
 
-### AnythingLLM API 配置
+安装 Whisper ONNX：
 
-```yaml
-llm:
-  anything_llm:
-    enabled: true  # 是否启用 AnythingLLM API
-    api_url: "http://localhost:3001"  # AnythingLLM API URL
-    api_key: ""  # API 密钥（如果需要）
+```bash
+python scripts/setup_whisper_onnx.py
 ```
+
+此脚本会自动安装必要的依赖并下载 ONNX 模型文件。
+
+### 转录优先级
+
+系统会按以下优先级选择转录方式：
+
+1. AnythingLLM API（如果可用）
+2. Whisper ONNX 本地转录（如果可用）
+3. 模拟转录（当以上方法都不可用时）
 
 ## Usage
 
@@ -289,6 +282,17 @@ integrated-assistant/
 │   ├── transcription.py  # Speech transcription service
 │   ├── llm_adapter.py    # LLM integration
 │   ├── meeting_service.py # Meeting management
+│   ├── langraph/         # Langraph 架构实现
+│   │   ├── core.py       # 核心组件和接口
+│   │   ├── transcription.py # 转录服务组件
+│   │   ├── llm_adapter.py # LLM 服务组件
+│   │   ├── vector_service.py # 向量存储组件
+│   │   ├── tool_service.py # 工具服务组件
+│   │   ├── agent_service.py # 代理服务组件
+│   │   ├── meeting_service.py # 会议服务组件
+│   │   ├── mcp_server.py # MCP 服务器组件
+│   │   ├── integration.py # 与现有服务器集成
+│   │   └── main.py       # 独立运行入口
 │   └── ...
 ├── frontend/             # Frontend UI
 ├── scripts/              # Setup and utility scripts
@@ -298,13 +302,83 @@ integrated-assistant/
 └── README.md             # This file
 ```
 
-### Adding New Features
+### Langraph 架构
 
-To add new features, follow these steps:
-1. Add service implementation in the `mcp` package
-2. Register the service in `mcp/server.py`
-3. Add UI components in the `frontend` package
-4. Update configuration in `config.yaml` if needed
+集成助手支持基于 langraph 的模块化架构，提供更灵活的组件化设计和扩展能力。
+
+### 什么是 Langraph
+
+Langraph 是一个基于 LangChain 的图形化组件框架，允许开发者以模块化、可组合的方式构建复杂的 AI 应用。在集成助手中，我们使用 Langraph 实现了各种服务组件，包括转录服务、LLM 服务、向量存储、工具服务、代理服务和会议服务等。
+
+### 安装 Langraph
+
+使用以下命令安装 Langraph 及其依赖：
+
+```bash
+python scripts/setup_langraph.py
+```
+
+此脚本会自动安装必要的依赖并创建所需的目录结构。
+
+### 使用 Langraph 架构启动服务
+
+集成助手提供了两种启动方式：
+
+1. 使用原始 MCP 服务器（默认）
+2. 使用基于 Langraph 的新架构
+
+要使用 Langraph 架构启动服务，请运行：
+
+```bash
+python scripts/start_with_langraph.py
+```
+
+可用的命令行参数：
+
+```
+--host HOST          # 设置服务器主机地址（默认为 127.0.0.1）
+--port PORT          # 设置服务器端口（默认为 8000）
+--ui-port PORT       # 设置 UI 端口（默认为 3000）
+--config PATH        # 配置文件路径
+--run-setup          # 在启动前运行安装脚本
+--no-browser         # 不自动打开浏览器
+--use-original       # 使用原始 MCP 服务器而不是 Langraph 架构
+```
+
+### Langraph 架构的优势
+
+1. **模块化设计**：各个组件可以独立开发、测试和部署
+2. **可扩展性**：轻松添加新的服务组件和功能
+3. **插件系统**：支持动态加载和使用插件
+4. **灵活的组件组合**：可以根据需要组合不同的组件
+5. **更好的错误处理**：每个组件都有独立的错误处理机制
+6. **更清晰的代码结构**：基于图形的组件结构使代码更易于理解和维护
+
+### 开发新组件
+
+要在 Langraph 架构中添加新组件，请按照以下步骤操作：
+
+1. 在 `mcp/langraph/` 目录下创建新的组件文件
+2. 继承 `MCPComponent` 类并实现必要的方法
+3. 在 `mcp/langraph/mcp_server.py` 中注册新组件
+4. 更新 `mcp/langraph/integration.py` 以集成新组件
+
+示例组件实现：
+
+```python
+from mcp.langraph.core import MCPComponent, MCPState
+
+class MyCustomComponent(MCPComponent):
+    def __init__(self, name="my_component", config=None):
+        super().__init__(name=name, description="My custom component")
+        self.config = config or {}
+    
+    def to_runnable(self):
+        def _run(state: MCPState, config=None):
+            # 实现组件逻辑
+            return {"result": "处理结果"}
+        return _run
+```
 
 ## License
 

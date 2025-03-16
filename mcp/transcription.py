@@ -41,6 +41,7 @@ class TranscriptionService:
         self.transcription_dir = config["meeting"]["transcription_dir"]
         self.whisper_model = config["meeting"]["whisper"]["model"]
         self.whisper_language = config["meeting"]["whisper"]["language"]
+        self.use_whisper_onnx = config["meeting"]["whisper"].get("use_onnx", False)
         
         # AnythingLLM API 配置
         self.anything_llm_enabled = config["llm"]["anything_llm"]["enabled"]
@@ -56,10 +57,20 @@ class TranscriptionService:
         
         # 检查转录服务可用性
         self.api_transcription_available = self._check_api_transcription()
-        self.whisper_available = False  # 不再使用本地 Whisper
+        self.whisper_onnx_available = self._check_whisper_onnx()
+        self.whisper_available = False  # 不再使用原始 Whisper
         
-        if not self.api_transcription_available:
-            logger.warning("AnythingLLM API 转录服务不可用，将使用模拟转录")
+        # 记录可用的转录方法
+        available_methods = []
+        if self.api_transcription_available:
+            available_methods.append("AnythingLLM API")
+        if self.whisper_onnx_available:
+            available_methods.append("Whisper ONNX")
+        
+        if available_methods:
+            logger.info(f"可用的转录方法: {', '.join(available_methods)}")
+        else:
+            logger.warning("没有可用的转录方法，将使用模拟转录")
     
     def _check_api_transcription(self):
         """检查 AnythingLLM API 转录服务是否可用"""
@@ -86,6 +97,22 @@ class TranscriptionService:
                 return False
         except Exception as e:
             logger.warning(f"检查 AnythingLLM API 时出错: {str(e)}")
+            return False
+    
+    def _check_whisper_onnx(self):
+        """检查 Whisper ONNX 是否可用"""
+        if not self.use_whisper_onnx:
+            return False
+            
+        try:
+            # 导入 Whisper ONNX 模块
+            from mcp.whisper_onnx import is_whisper_onnx_available
+            return is_whisper_onnx_available()
+        except ImportError:
+            logger.warning("Whisper ONNX 模块不可用")
+            return False
+        except Exception as e:
+            logger.warning(f"检查 Whisper ONNX 时出错: {str(e)}")
             return False
     
     def _check_whisper(self):
@@ -190,13 +217,18 @@ class TranscriptionService:
         try:
             logger.info(f"开始转录任务: {task_id}, 音频: {audio_path}")
             
-            # 检查是否可以使用 AnythingLLM API 进行转录
+            # 选择转录方法
             if self.api_transcription_available:
-                # 使用 AnythingLLM API 进行转录
+                # 优先使用 AnythingLLM API 进行转录
+                logger.info("使用 AnythingLLM API 进行转录")
                 transcription_result = self._transcribe_with_api(audio_path)
+            elif self.whisper_onnx_available:
+                # 其次使用 Whisper ONNX 进行转录
+                logger.info("使用 Whisper ONNX 进行转录")
+                transcription_result = self._transcribe_with_onnx(audio_path)
             else:
-                # 使用模拟转录
-                logger.warning("使用模拟转录（AnythingLLM API 不可用）")
+                # 最后使用模拟转录
+                logger.warning("使用模拟转录（没有可用的转录方法）")
                 transcription_result = self._mock_transcription(task_id, meeting_id, audio_path)
             
             # 添加任务和会议信息
@@ -319,6 +351,49 @@ class TranscriptionService:
         }
         
         return transcription_result
+    
+    def _transcribe_with_onnx(self, audio_path: str) -> Dict[str, Any]:
+        """
+        使用 Whisper ONNX 进行转录
+        
+        Args:
+            audio_path: 音频文件路径
+        
+        Returns:
+            转录结果
+        """
+        try:
+            # 导入 Whisper ONNX 模块
+            from mcp.whisper_onnx import WhisperONNX
+            
+            # 获取模型目录
+            root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            model_dir = os.path.join(root_dir, "models", "whisper_onnx")
+            
+            # 创建 Whisper ONNX 实例
+            whisper = WhisperONNX(
+                model_dir=model_dir,
+                model_size=self.whisper_model
+            )
+            
+            # 设置语言参数
+            language = None if self.whisper_language == "auto" else self.whisper_language
+            
+            # 执行转录
+            logger.info(f"开始使用 Whisper ONNX 转录音频: {audio_path}")
+            start_time = time.time()
+            
+            # 使用 Whisper ONNX 进行转录
+            result = whisper.transcribe(audio_path, language=language)
+            
+            end_time = time.time()
+            logger.info(f"转录完成，耗时: {end_time - start_time:.2f}秒")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"使用 Whisper ONNX 转录时出错: {str(e)}")
+            raise
     
     def _mock_transcription(self, task_id: str, meeting_id: str, audio_path: str) -> Dict[str, Any]:
         """
