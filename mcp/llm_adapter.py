@@ -41,6 +41,10 @@ class LLMAdapterService:
         self.anything_llm_api_url = config["llm"]["anything_llm"]["api_url"]
         self.anything_llm_api_key = config["llm"]["anything_llm"]["api_key"]
         
+        # 本地LLM配置
+        self.local_llm = None
+        self.local_llm_available = self._check_local_llm()
+        
         # 模板缓存
         self.templates = self._load_default_templates()
     
@@ -75,6 +79,35 @@ key_points应为包含timestamp, speaker, point字段的对象数组
             "email_analysis": "请分析以下邮件内容，提取主题、情感和优先级：\n\n{email_content}",
             "knowledge_query": "基于以下背景信息，请回答问题：\n\n背景信息：{context}\n\n问题：{query}"
         }
+    
+    def _check_local_llm(self) -> bool:
+        """检查本地LLM是否可用"""
+        if self.model_type != "local":
+            return False
+            
+        try:
+            # 检查本地LLM模块是否可用
+            from mcp.local_llm import is_local_llm_available
+            return is_local_llm_available()
+        except ImportError:
+            logger.warning("本地LLM模块不可用")
+            return False
+        except Exception as e:
+            logger.warning(f"检查本地LLM时出错: {str(e)}")
+            return False
+    
+    def _init_local_llm(self):
+        """初始化本地LLM"""
+        if self.local_llm is None and self.local_llm_available:
+            try:
+                from mcp.local_llm import LocalLLM
+                self.local_llm = LocalLLM(
+                    model_dir=self.model_path
+                )
+                logger.info("本地LLM模型初始化成功")
+            except Exception as e:
+                logger.error(f"初始化本地LLM模型失败: {str(e)}")
+                self.local_llm_available = False
     
     def _call_anything_llm(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -122,23 +155,36 @@ key_points应为包含timestamp, speaker, point字段的对象数组
         Returns:
             模型列表
         """
+        models = []
+        
+        # 检查AnythingLLM API
         if self.anything_llm_enabled:
             try:
                 # 调用AnythingLLM API获取模型列表
                 response = self._call_anything_llm("models", {})
-                return response.get("models", [])
+                models.extend(response.get("models", []))
             except Exception as e:
                 logger.error(f"获取AnythingLLM模型列表失败: {str(e)}")
         
-        # 返回本地模型列表（模拟数据）
-        return [
-            {
+        # 检查本地模型
+        if self.local_llm_available:
+            models.append({
                 "id": "local-model",
                 "name": "本地模型",
                 "type": self.model_type,
                 "path": self.model_path
-            }
-        ]
+            })
+        
+        # 如果没有可用模型，返回模拟数据
+        if not models:
+            models.append({
+                "id": "mock-model",
+                "name": "模拟模型",
+                "type": "mock",
+                "path": ""
+            })
+        
+        return models
     
     def get_embedding(self, text: str) -> List[float]:
         """
@@ -160,6 +206,8 @@ key_points应为包含timestamp, speaker, point字段的对象数组
             except Exception as e:
                 logger.error(f"获取AnythingLLM嵌入向量失败: {str(e)}")
         
+        # TODO: 实现本地嵌入模型
+        
         # 返回模拟的嵌入向量（实际项目中应该使用真实的嵌入模型）
         import random
         return [random.random() for _ in range(384)]
@@ -176,6 +224,7 @@ key_points应为包含timestamp, speaker, point字段的对象数组
         Returns:
             生成的文本
         """
+        # 尝试使用AnythingLLM API
         if self.anything_llm_enabled:
             try:
                 # 调用AnythingLLM API生成文本
@@ -188,6 +237,19 @@ key_points应为包含timestamp, speaker, point字段的对象数组
             except Exception as e:
                 logger.error(f"AnythingLLM生成文本失败: {str(e)}")
         
+        # 尝试使用本地LLM
+        if self.local_llm_available:
+            try:
+                self._init_local_llm()
+                if self.local_llm:
+                    return self.local_llm.generate(
+                        prompt=prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature
+                    )
+            except Exception as e:
+                logger.error(f"本地LLM生成文本失败: {str(e)}")
+        
         # 返回模拟的生成文本（实际项目中应该使用真实的LLM模型）
         # 这里根据不同的提示词模拟不同的响应
         if "会议记录" in prompt and "摘要" in prompt and "结构化" in prompt:
@@ -199,27 +261,37 @@ key_points应为包含timestamp, speaker, point字段的对象数组
                 "action_items": [
                     {"assignee": "张三", "task": "完成前端界面开发", "due_date": "2023-10-15", "status": "进行中"},
                     {"assignee": "李四", "task": "修复已知的3个关键bug", "due_date": "2023-10-10", "status": "待处理"},
-                    {"assignee": "王五", "task": "准备下周的演示文稿", "due_date": "2023-10-12", "status": "待处理"}
+                    {"assignee": "王五", "task": "准备下周的演示文稿", "due_date": "2023-10-12", "status": "未开始"}
                 ],
                 "key_points": [
-                    {"timestamp": "00:01:15", "speaker": "项目经理", "point": "项目当前完成度约为60%"},
-                    {"timestamp": "00:05:30", "speaker": "测试负责人", "point": "测试团队报告了3个关键bug"},
-                    {"timestamp": "00:12:45", "speaker": "产品经理", "point": "决定增加两名开发人员加速进度"},
-                    {"timestamp": "00:20:10", "speaker": "项目经理", "point": "下一次评审会议定在周五下午3点"}
+                    {"timestamp": "00:05:23", "speaker": "张三", "point": "报告了前端开发的当前进度，完成了约70%的计划功能"},
+                    {"timestamp": "00:12:45", "speaker": "李四", "point": "提出了后端API的性能问题，需要优化数据库查询"},
+                    {"timestamp": "00:25:30", "speaker": "王五", "point": "建议增加用户反馈收集功能，以便及时调整产品方向"}
                 ]
             }, ensure_ascii=False)
         elif "会议记录" in prompt and "摘要" in prompt:
+            # 模拟会议摘要
             return "会议主要讨论了项目进度和下一步计划。团队报告了当前的开发状态，并确定了需要解决的关键问题。会议决定在下周五前完成初步原型，并安排了下一次评审会议的时间。"
         elif "会议记录" in prompt and "关键点" in prompt:
-            return "1. [00:01:15] 项目当前完成度约为60%\n2. [00:05:30] 测试团队报告了3个关键bug\n3. [00:12:45] 决定增加两名开发人员加速进度\n4. [00:20:10] 下一次评审会议定在周五下午3点"
+            # 模拟会议关键点
+            return "1. [00:05:23] 张三报告了前端开发的当前进度，完成了约70%的计划功能\n2. [00:12:45] 李四提出了后端API的性能问题，需要优化数据库查询\n3. [00:25:30] 王五建议增加用户反馈收集功能，以便及时调整产品方向"
         elif "邮件" in prompt and "回复" in prompt:
-            return "感谢您的邮件。我已收到您的请求，并会尽快处理。如有任何疑问，请随时联系我。\n\n祝好，\n[您的名字]"
+            # 模拟邮件回复
+            return "感谢您的邮件。我已收到您的请求，并会尽快处理。如有任何疑问，请随时联系我。"
         elif "邮件" in prompt and "分析" in prompt:
-            return "主题：项目合作请求\n情感：积极\n优先级：中等\n关键点：对方希望探讨潜在的合作机会，建议安排会议讨论细节。"
+            # 模拟邮件分析
+            return json.dumps({
+                "subject": "项目进度汇报",
+                "sentiment": "积极",
+                "priority": "中等",
+                "key_points": ["项目按计划进行", "需要解决一些技术问题", "请求下周安排会议讨论"]
+            }, ensure_ascii=False)
         elif "背景信息" in prompt and "问题" in prompt:
-            return "根据提供的背景信息，我认为最佳解决方案是采用分布式架构来处理大规模数据处理需求。这种方法可以提高系统的可扩展性和容错能力，同时减少单点故障的风险。"
+            # 模拟知识库查询
+            return "根据提供的背景信息，您的问题的答案是：这个项目使用了React和Node.js技术栈，主要功能包括用户认证、数据可视化和报表生成。部署需要使用Docker容器，并且需要配置MongoDB数据库。"
         else:
-            return "我是一个AI助手，很高兴能帮助您解决问题。请提供更多具体信息，以便我能更好地为您服务。"
+            # 通用回复
+            return f"这是对您提问的回复。您的提问内容涉及到了{prompt[:20]}...等方面的内容。由于当前没有可用的LLM服务，这是一个模拟的回复。在实际部署中，您需要配置AnythingLLM API或者本地LLM模型来获取真实的AI回复。"
     
     def generate_meeting_summary(self, transcription: str) -> str:
         """

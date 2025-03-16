@@ -2,19 +2,16 @@
 # -*- coding: utf-8 -*-
 
 """
-基于 langraph 的转录组件
-包括 Whisper ONNX 和 AnythingLLM API 转录实现
+Langraph 转录组件
+基于 Langraph 架构的转录服务组件
 """
 
 import os
-import sys
-import logging
 import time
+import logging
 from typing import Dict, Any, List, Optional, Union
-from pathlib import Path
 
-from mcp.langraph.core import MCPComponent, TranscriptionComponent
-from mcp.whisper_onnx import WhisperONNX, is_whisper_onnx_available
+from mcp.langraph.core import MCPComponent, MCPState
 
 # 配置日志
 logging.basicConfig(
@@ -23,351 +20,199 @@ logging.basicConfig(
 )
 logger = logging.getLogger("langraph.transcription")
 
-class WhisperONNXComponent(TranscriptionComponent):
-    """Whisper ONNX 转录组件"""
+class TranscriptionComponent(MCPComponent):
+    """转录组件，用于将音频转换为文本"""
     
-    def __init__(
-        self, 
-        name: str = "whisper_onnx",
-        model_dir: Optional[str] = None,
-        model_size: str = "base",
-        language: Optional[str] = None
-    ):
+    def __init__(self, config: Dict[str, Any]):
         """
-        初始化 Whisper ONNX 转录组件
+        初始化转录组件
         
         Args:
-            name: 组件名称
-            model_dir: 模型目录，默认为 "models/whisper_onnx"
-            model_size: 模型大小，默认为 "base"
-            language: 语言，默认为 None (自动检测)
+            config: 配置信息
         """
-        super().__init__(
-            name=name,
-            description=f"Whisper ONNX 转录组件 (model_size={model_size})"
-        )
+        super().__init__()
+        self.config = config
+        self.transcription_service = None
         
-        # 获取项目根目录
-        if model_dir is None:
-            root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-            model_dir = os.path.join(root_dir, "models", "whisper_onnx")
-        
-        self.model_dir = model_dir
-        self.model_size = model_size
-        self.language = language
-        self.whisper = None
-        
-        # 检查 Whisper ONNX 是否可用
-        if not is_whisper_onnx_available():
-            logger.warning("Whisper ONNX 不可用，请先运行 setup_whisper_onnx.py 安装")
-        else:
-            try:
-                self.whisper = WhisperONNX(
-                    model_dir=self.model_dir,
-                    model_size=self.model_size
-                )
-                logger.info(f"Whisper ONNX 组件已初始化: {self.name}")
-            except Exception as e:
-                logger.error(f"初始化 Whisper ONNX 失败: {str(e)}")
+        # 初始化转录服务
+        self._init_transcription_service()
     
-    def is_available(self) -> bool:
-        """
-        检查组件是否可用
-        
-        Returns:
-            是否可用
-        """
-        return self.whisper is not None
+    def _init_transcription_service(self):
+        """初始化转录服务"""
+        try:
+            from mcp.transcription import TranscriptionService
+            self.transcription_service = TranscriptionService(self.config)
+            logger.info("转录服务初始化成功")
+        except Exception as e:
+            logger.error(f"初始化转录服务失败: {str(e)}")
+            self.transcription_service = None
     
-    def process(self, audio_path: str) -> Dict[str, Any]:
+    def process(self, state: MCPState) -> MCPState:
         """
-        处理音频
+        处理转录请求
         
         Args:
-            audio_path: 音频文件路径
+            state: 当前状态
         
         Returns:
-            转录结果
+            更新后的状态
         """
-        if not self.is_available():
-            raise RuntimeError("Whisper ONNX 不可用")
+        # 检查是否需要转录
+        if "audio_path" not in state.inputs:
+            logger.warning("没有提供音频路径，跳过转录")
+            state.outputs["transcription"] = {"error": "没有提供音频路径"}
+            return state
         
+        audio_path = state.inputs["audio_path"]
+        language = state.inputs.get("language")
+        
+        # 检查音频文件是否存在
         if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"音频文件不存在: {audio_path}")
+            error_msg = f"音频文件不存在: {audio_path}"
+            logger.error(error_msg)
+            state.outputs["transcription"] = {"error": error_msg}
+            return state
+        
+        # 检查转录服务是否可用
+        if self.transcription_service is None:
+            logger.error("转录服务不可用")
+            state.outputs["transcription"] = {"error": "转录服务不可用"}
+            return state
         
         try:
+            # 记录开始时间
+            start_time = time.time()
+            
+            # 执行转录
             logger.info(f"开始转录音频: {audio_path}")
-            start_time = time.time()
+            result = self.transcription_service.transcribe(audio_path, language)
             
-            result = self.whisper.transcribe(audio_path, language=self.language)
-            
-            end_time = time.time()
-            processing_time = end_time - start_time
-            
+            # 记录处理时间
+            processing_time = time.time() - start_time
             logger.info(f"转录完成，耗时: {processing_time:.2f}秒")
             
-            return result
+            # 更新状态
+            state.outputs["transcription"] = result
+            state.outputs["text"] = result.get("text", "")
+            
+            # 如果有错误，记录到状态中
+            if "error" in result:
+                state.outputs["error"] = result["error"]
+            
+            return state
+            
         except Exception as e:
-            logger.error(f"转录失败: {str(e)}")
-            raise
+            error_msg = f"转录失败: {str(e)}"
+            logger.exception(error_msg)
+            
+            # 更新状态
+            state.outputs["transcription"] = {"error": error_msg}
+            state.outputs["error"] = error_msg
+            
+            return state
 
-class AnythingLLMTranscriptionComponent(TranscriptionComponent):
-    """AnythingLLM API 转录组件"""
+class MockTranscriptionComponent(MCPComponent):
+    """模拟转录组件，用于测试"""
     
-    def __init__(
-        self,
-        name: str = "anything_llm_transcription",
-        api_url: str = "http://localhost:3001",
-        api_key: Optional[str] = None
-    ):
-        """
-        初始化 AnythingLLM API 转录组件
-        
-        Args:
-            name: 组件名称
-            api_url: API URL
-            api_key: API 密钥
-        """
-        super().__init__(
-            name=name,
-            description="AnythingLLM API 转录组件"
-        )
-        
-        self.api_url = api_url
-        self.api_key = api_key
-    
-    def is_available(self) -> bool:
-        """
-        检查组件是否可用
-        
-        Returns:
-            是否可用
-        """
-        try:
-            import requests
-            
-            # 检查 API 是否可用
-            headers = {}
-            if self.api_key:
-                headers["x-api-key"] = self.api_key
-            
-            response = requests.get(
-                f"{self.api_url}/api/health",
-                headers=headers,
-                timeout=5
-            )
-            
-            return response.status_code == 200
-        except Exception as e:
-            logger.error(f"检查 AnythingLLM API 可用性失败: {str(e)}")
-            return False
-    
-    def process(self, audio_path: str) -> Dict[str, Any]:
-        """
-        处理音频
-        
-        Args:
-            audio_path: 音频文件路径
-        
-        Returns:
-            转录结果
-        """
-        if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"音频文件不存在: {audio_path}")
-        
-        try:
-            import requests
-            
-            logger.info(f"开始通过 AnythingLLM API 转录音频: {audio_path}")
-            start_time = time.time()
-            
-            # 准备请求头
-            headers = {}
-            if self.api_key:
-                headers["x-api-key"] = self.api_key
-            
-            # 准备文件
-            with open(audio_path, "rb") as f:
-                files = {"file": (os.path.basename(audio_path), f, "audio/mpeg")}
-                
-                # 发送请求
-                response = requests.post(
-                    f"{self.api_url}/api/transcribe",
-                    headers=headers,
-                    files=files,
-                    timeout=60
-                )
-            
-            # 检查响应
-            if response.status_code != 200:
-                raise Exception(f"API 请求失败: {response.status_code} {response.text}")
-            
-            # 解析响应
-            result = response.json()
-            
-            end_time = time.time()
-            processing_time = end_time - start_time
-            
-            logger.info(f"转录完成，耗时: {processing_time:.2f}秒")
-            
-            return {
-                "text": result.get("text", ""),
-                "segments": result.get("segments", []),
-                "language": result.get("language", "")
-            }
-        except Exception as e:
-            logger.error(f"转录失败: {str(e)}")
-            raise
-
-class MockTranscriptionComponent(TranscriptionComponent):
-    """模拟转录组件，用于测试和开发"""
-    
-    def __init__(self, name: str = "mock_transcription"):
+    def __init__(self, config: Dict[str, Any] = None):
         """
         初始化模拟转录组件
         
         Args:
-            name: 组件名称
+            config: 配置信息
         """
-        super().__init__(
-            name=name,
-            description="模拟转录组件"
-        )
+        super().__init__()
+        self.config = config or {}
     
-    def is_available(self) -> bool:
+    def process(self, state: MCPState) -> MCPState:
         """
-        检查组件是否可用
-        
-        Returns:
-            是否可用
-        """
-        return True
-    
-    def process(self, audio_path: str) -> Dict[str, Any]:
-        """
-        处理音频
+        处理转录请求
         
         Args:
-            audio_path: 音频文件路径
+            state: 当前状态
         
         Returns:
-            转录结果
+            更新后的状态
         """
-        if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"音频文件不存在: {audio_path}")
+        # 检查是否需要转录
+        if "audio_path" not in state.inputs:
+            logger.warning("没有提供音频路径，跳过转录")
+            state.outputs["transcription"] = {"error": "没有提供音频路径"}
+            return state
         
-        logger.info(f"模拟转录音频: {audio_path}")
+        audio_path = state.inputs["audio_path"]
         
-        # 模拟处理时间
+        # 模拟处理延迟
         time.sleep(1)
         
-        # 返回模拟结果
-        return {
-            "text": "这是一段模拟转录的文本，用于测试和开发。",
-            "segments": [
-                {
-                    "id": 0,
-                    "start": 0,
-                    "end": 5,
-                    "text": "这是一段模拟转录的文本，"
-                },
-                {
-                    "id": 1,
-                    "start": 5,
-                    "end": 10,
-                    "text": "用于测试和开发。"
-                }
-            ],
-            "language": "zh"
+        # 模拟转录结果
+        result = {
+            "text": "这是一个模拟的转录结果。在实际部署中，您需要配置 AnythingLLM API 或者 Whisper ONNX 模型来获取真实的转录结果。",
+            "segments": [],
+            "language": "zh",
+            "model": "mock",
+            "processing_time": 1.0
         }
+        
+        # 更新状态
+        state.outputs["transcription"] = result
+        state.outputs["text"] = result["text"]
+        
+        logger.info(f"模拟转录完成: {audio_path}")
+        return state
 
-class TranscriptionService:
-    """转录服务，管理多个转录组件"""
+def create_transcription_component(config: Dict[str, Any]) -> MCPComponent:
+    """
+    创建转录组件
     
-    def __init__(self, config: Dict[str, Any]):
-        """
-        初始化转录服务
-        
-        Args:
-            config: 配置
-        """
-        self.config = config
-        self.components: Dict[str, TranscriptionComponent] = {}
-        
-        # 初始化组件
-        self._init_components()
+    Args:
+        config: 配置信息
     
-    def _init_components(self):
-        """初始化组件"""
-        # 添加 AnythingLLM API 组件
-        if self.config.get("llm", {}).get("anything_llm", {}).get("enabled", False):
-            api_url = self.config.get("llm", {}).get("anything_llm", {}).get("api_url", "http://localhost:3001")
-            api_key = self.config.get("llm", {}).get("anything_llm", {}).get("api_key")
+    Returns:
+        转录组件实例
+    """
+    # 首先检查是否启用了本地 Whisper 模型
+    try:
+        whisper_config = config.get("meeting", {}).get("whisper", {})
+        use_local = whisper_config.get("use_local", False)
+        
+        if use_local:
+            # 尝试创建本地 Whisper 组件
+            from mcp.langraph.local_whisper_component import create_local_whisper_component
+            local_whisper = create_local_whisper_component(config)
             
-            component = AnythingLLMTranscriptionComponent(
-                api_url=api_url,
-                api_key=api_key
-            )
-            
-            self.add_component(component)
-        
-        # 添加 Whisper ONNX 组件
-        if self.config.get("meeting", {}).get("whisper", {}).get("use_onnx", False):
-            model_size = self.config.get("meeting", {}).get("whisper", {}).get("model", "base")
-            language = self.config.get("meeting", {}).get("whisper", {}).get("language", "auto")
-            
-            component = WhisperONNXComponent(
-                model_size=model_size,
-                language=None if language == "auto" else language
-            )
-            
-            self.add_component(component)
-        
-        # 添加模拟组件
-        self.add_component(MockTranscriptionComponent())
+            if local_whisper:
+                logger.info("使用本地 Whisper 组件")
+                return local_whisper
+    except Exception as e:
+        logger.error(f"创建本地 Whisper 组件失败: {str(e)}")
     
-    def add_component(self, component: TranscriptionComponent):
-        """
-        添加组件
+    # 检查转录服务是否可用
+    try:
+        from mcp.transcription import TranscriptionService
         
-        Args:
-            component: 要添加的组件
-        """
-        self.components[component.name] = component
-        logger.info(f"添加转录组件: {component.name}")
+        # 检查配置中的转录提供商
+        provider = config["transcription"]["provider"]
+        
+        if provider == "whisper_onnx":
+            # 检查 Whisper ONNX 是否可用
+            from mcp.whisper_onnx import is_whisper_onnx_available
+            if is_whisper_onnx_available():
+                logger.info("使用 Whisper ONNX 转录组件")
+                return TranscriptionComponent(config)
+        
+        elif provider == "anything_llm":
+            # 检查 AnythingLLM API 是否可用
+            anything_llm_enabled = config["llm"]["anything_llm"]["enabled"]
+            if anything_llm_enabled:
+                logger.info("使用 AnythingLLM API 转录组件")
+                return TranscriptionComponent(config)
+        
+        # 如果没有可用的转录服务，使用模拟组件
+        logger.warning("没有可用的转录服务，使用模拟转录组件")
+        return MockTranscriptionComponent(config)
     
-    def get_available_component(self) -> Optional[TranscriptionComponent]:
-        """
-        获取可用的组件
-        
-        Returns:
-            可用的组件，如果没有则返回 None
-        """
-        # 优先级：AnythingLLM API > Whisper ONNX > 模拟
-        for name in ["anything_llm_transcription", "whisper_onnx", "mock_transcription"]:
-            if name in self.components and self.components[name].is_available():
-                return self.components[name]
-        
-        return None
-    
-    def transcribe(self, audio_path: str) -> Dict[str, Any]:
-        """
-        转录音频
-        
-        Args:
-            audio_path: 音频文件路径
-        
-        Returns:
-            转录结果
-        
-        Raises:
-            RuntimeError: 没有可用的转录组件时抛出
-        """
-        component = self.get_available_component()
-        
-        if component is None:
-            raise RuntimeError("没有可用的转录组件")
-        
-        logger.info(f"使用组件 {component.name} 转录音频")
-        
-        return component.process(audio_path)
+    except Exception as e:
+        logger.error(f"创建转录组件失败: {str(e)}")
+        logger.warning("使用模拟转录组件")
+        return MockTranscriptionComponent(config)

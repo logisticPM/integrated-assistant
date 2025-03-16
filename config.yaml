@@ -1,61 +1,63 @@
 app:
-  title: "集成助手"
-  theme: "default"
   debug: false
-
-server:
-  use_langraph: true  # 是否使用Langraph架构
-  host: "127.0.0.1"
-  port: 8000
-
-llm:
-  model: "local"  # local, openai, etc.
-  model_path: "./models/llm"
-  embedding_model: "local"
-  embedding_model_path: "./models/embedding"
-  # AnythingLLM集成配置
-  anything_llm:
-    enabled: true
-    api_url: "http://localhost:3001"
-    api_key: "A3QKACB-NVW40SY-HZJ8BE9-5960K5B"  # 如需设置API密钥，请在此处填写
-
-meeting:
-  audio_dir: "./data/audio"
-  transcription_dir: "./data/transcriptions"
-  whisper:
-    model: "base"  # tiny, base, small, medium, large
-    language: "auto"  # 默认语言，可选auto
-    use_onnx: true  # 是否使用 ONNX 运行时版本的 Whisper
-
+  theme: default
+  title: 集成助手
+db:
+  sqlite_path: ./data/app.db
+  vector_db_path: ./data/vector_db
 email:
-  sync_interval: 300  # 秒
   max_emails: 1000
   providers:
-    - name: "gmail"
-      enabled: false
-      credentials_file: "./credentials/gmail.json"
-
+  - credentials_file: ./credentials/gmail.json
+    enabled: false
+    name: gmail
+  sync_interval: 300
 knowledge:
-  docs_dir: "./data/documents"
-  chunk_size: 1000
   chunk_overlap: 200
-  embedding_model: "all-MiniLM-L6-v2"  # sentence-transformers模型名称
-  splitter_type: "smart"  # 分块器类型：simple, markdown, smart
-  supported_extensions:  # 支持的文件扩展名
-    - ".txt"
-    - ".md"
-    - ".pdf"
-    - ".docx"
-    - ".html"
-    - ".csv"
-  use_mock_embedder: false  # 是否使用模拟嵌入器（用于测试）
-  vector_search_top_k: 5  # 向量搜索返回的最大结果数
-
-db:
-  sqlite_path: "./data/app.db"
-  vector_db_path: "./data/vector_db"
-
+  chunk_size: 1000
+  docs_dir: ./data/documents
+  embedding_model: all-MiniLM-L6-v2
+  splitter_type: smart
+  supported_extensions:
+  - .txt
+  - .md
+  - .pdf
+  - .docx
+  - .html
+  - .csv
+  use_mock_embedder: false
+  vector_search_top_k: 5
+llm:
+  model: api  # 可选值: api, local
+  model_path: ./models/llm
+  embedding_model: api  # 可选值: api, local
+  embedding_model_path: ./models/embedding
+  anything_llm:
+    enabled: true
+    api_url: http://localhost:3001
+    api_key: A3QKACB-NVW40SY-HZJ8BE9-5960K5B
+  local:
+    enabled: false  # 是否启用本地 LLM 模型
+    use_qnn: false  # 是否使用 QNN 执行提供程序
+    max_new_tokens: 512  # 最大生成标记数
+    temperature: 0.7  # 温度参数
 mcp:
-  server_host: "127.0.0.1"
-  server_port: 5000
   max_workers: 4
+  server_host: 127.0.0.1
+  server_port: 5000
+meeting:
+  audio_dir: ./data/audio
+  transcription_dir: ./data/transcriptions
+  whisper:
+    language: auto
+    model: base
+    use_onnx: true
+    model_path: ./models/whisper  # 本地 Whisper 模型路径
+    use_local: false  # 是否使用本地 Whisper 模型
+    use_qnn: false  # 是否使用 QNN 执行提供程序
+    anything_llm:
+      enabled: true  # 是否使用 AnythingLLM API 进行转录
+server:
+  host: 127.0.0.1
+  port: 8000
+  use_langraph: true

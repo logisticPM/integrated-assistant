@@ -136,7 +136,7 @@ def main():
                         default="http://localhost:3001/api", help="AnythingLLM API URL")
     parser.add_argument("--skip-whisper", action="store_true", help="Skip Whisper installation")
     parser.add_argument("--skip-knowledge", action="store_true", help="Skip knowledge base setup")
-    parser.add_argument("--skip-gmail", action="store_true", help="Skip Gmail setup")
+    # Gmail argument removed
     
     args = parser.parse_args()
     
@@ -166,7 +166,7 @@ def main():
         whisper_args = ["--model", args.whisper_model]
         if not run_script("setup_whisper.py", whisper_args):
             logger.error("Whisper installation failed, deployment continues but speech transcription may not be available")
-    else:
+
         logger.info("Skipping Whisper installation")
     
     # Set up knowledge base
@@ -174,16 +174,16 @@ def main():
         logger.info("\nStep 3: Setting up knowledge base")
         if not run_script("setup_knowledge.py"):
             logger.error("Knowledge base setup failed, deployment continues but knowledge base features may not be available")
-    else:
+
         logger.info("Skipping knowledge base setup")
     
-    # Set up Gmail integration
-    if not args.skip_gmail:
-        logger.info("\nStep 4: Setting up Gmail integration")
-        if not run_script("setup_gmail.py"):
-            logger.error("Gmail setup failed, deployment continues but email integration may not be available")
-    else:
-        logger.info("Skipping Gmail setup")
+    # Gmail integration has been removed
+    # Gmail integration has been removed
+    logger.info("\nStep 4: Gmail integration has been removed")
+    # Gmail setup script has been removed
+    # Email integration is no longer available
+
+
     
     # Set up scheduled tasks
     logger.info("\nStep 5: Setting up scheduled tasks")

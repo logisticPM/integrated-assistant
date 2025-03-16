@@ -185,7 +185,7 @@ def main():
                         default="http://localhost:3001/api", help="AnythingLLM API URL")
     parser.add_argument("--skip-whisper", action="store_true", help="Skip Whisper installation")
     parser.add_argument("--skip-knowledge", action="store_true", help="Skip knowledge base setup")
-    parser.add_argument("--skip-gmail", action="store_true", help="Skip Gmail setup")
+    # Gmail argument removed
     parser.add_argument("--skip-langraph", action="store_true", help="Skip Langraph setup")
     parser.add_argument("--use-langraph", action="store_true", help="Use Langraph architecture by default")
     parser.add_argument("--skip-ffmpeg", action="store_true", help="Skip FFmpeg installation")
@@ -217,10 +217,10 @@ def main():
         logger.info("\nStep 2: Setting up Langraph architecture")
         if not run_script("setup_langraph.py"):
             logger.error("Langraph setup failed, deployment continues but Langraph features may not be available")
-        else:
+    
             # Update configuration to use Langraph if requested
             update_config_langraph(use_langraph=args.use_langraph)
-    else:
+
         logger.info("Skipping Langraph setup")
     
     # 安装 FFmpeg (用于 Whisper)
@@ -230,7 +230,7 @@ def main():
             logger.warning("FFmpeg installation failed or requires manual intervention")
             logger.warning("Please run scripts/install_ffmpeg.bat as administrator")
             logger.warning("Or download and install FFmpeg manually: https://ffmpeg.org/download.html")
-    else:
+
         logger.info("Skipping FFmpeg installation")
     
     # Install and set up Whisper
@@ -239,7 +239,7 @@ def main():
         whisper_args = ["--model", args.whisper_model]
         if not run_script("setup_whisper.py", whisper_args):
             logger.error("Whisper installation failed, deployment continues but speech transcription may not be available")
-    else:
+
         logger.info("Skipping Whisper installation")
     
     # Set up knowledge base
@@ -247,16 +247,16 @@ def main():
         logger.info("\nStep 5: Setting up knowledge base")
         if not run_script("setup_knowledge.py"):
             logger.error("Knowledge base setup failed, deployment continues but knowledge base features may not be available")
-    else:
+
         logger.info("Skipping knowledge base setup")
     
-    # Set up Gmail integration
-    if not args.skip_gmail:
-        logger.info("\nStep 6: Setting up Gmail integration")
-        if not run_script("setup_gmail.py"):
-            logger.error("Gmail setup failed, deployment continues but email integration may not be available")
-    else:
-        logger.info("Skipping Gmail setup")
+    # Gmail integration has been removed
+    # Gmail integration has been removed
+    logger.info("\nStep 6: Gmail integration has been removed")
+    # Gmail setup script has been removed
+    # Email integration is no longer available
+
+
     
     # Set up scheduled tasks
     logger.info("\nStep 7: Setting up scheduled tasks")
@@ -269,7 +269,7 @@ def main():
     
     if args.use_langraph:
         logger.info(f"python {os.path.join(ROOT_DIR, 'scripts', 'start_with_langraph.py')}")
-    else:
+
         logger.info(f"python {os.path.join(ROOT_DIR, 'start.py')}")
         logger.info(f"To use Langraph architecture: python {os.path.join(ROOT_DIR, 'scripts', 'start_with_langraph.py')}")
     
