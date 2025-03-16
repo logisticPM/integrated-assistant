@@ -81,7 +81,7 @@ def start_server(host="127.0.0.1", port=8000, config_path="config.yaml"):
     Returns:
         Server process
     """
-    server_script = os.path.join(ROOT_DIR, "scripts", "start_with_langraph.py")
+    server_script = os.path.join(ROOT_DIR, "scripts", "langraph_server.py")
     cmd = [
         sys.executable,
         server_script,

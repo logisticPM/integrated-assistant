@@ -23,7 +23,8 @@ An intelligent assistant that integrates meeting recording transcription, summar
 The project provides a one-click deployment script that automatically installs and configures all necessary components:
 
 ```powershell
-python scripts\setup_all.py
+python scripts\setup_all.py  # 标准架构
+python scripts\setup_all_with_langraph.py  # Langraph 架构
 ```
 
 During deployment, you can:
@@ -38,6 +39,7 @@ Available command line arguments:
 --skip-whisper                                  # Skip Whisper installation
 --skip-knowledge                                # Skip knowledge base setup
 --skip-gmail                                    # Skip Gmail setup
+--use-langraph                                  # Use Langraph architecture (for setup_all_with_langraph.py)
 ```
 
 ### Individual Component Installation
@@ -84,17 +86,21 @@ The application will start at http://localhost:7860.
 Use the one-click startup script to start both the backend service and frontend UI:
 
 ```powershell
-python start.py
+python start.py  # 标准架构
+python start_with_langraph.py  # Langraph 架构
 ```
 
 The startup script will automatically open a browser to access the Integrated Assistant interface.
 
 Available command line arguments:
 ```
---host HOST          # Set server host address (default is 0.0.0.0)
---port PORT          # Set server port (default is 7860)
+--host HOST          # Set server host address (default: 127.0.0.1)
+--port PORT          # Set server port (default: 8000)
+--ui-port PORT       # Set UI port (default: 8501)
+--config PATH        # Configuration file path
+--setup              # Run setup before starting (Langraph version only)
+--setup-all          # Run full setup before starting (Langraph version only)
 --no-browser         # Don't automatically open browser
---setup              # Run setup script before starting
 ```
 
 ### Manual Startup
@@ -330,19 +336,44 @@ python scripts/setup_langraph.py
 要使用 Langraph 架构启动服务，请运行：
 
 ```bash
-python scripts/start_with_langraph.py
+python start_with_langraph.py
+```
+
+或者直接启动服务器组件（不包括 UI）：
+
+```bash
+python scripts/langraph_server.py
 ```
 
 可用的命令行参数：
 
 ```
+# start_with_langraph.py 参数
 --host HOST          # 设置服务器主机地址（默认为 127.0.0.1）
 --port PORT          # 设置服务器端口（默认为 8000）
---ui-port PORT       # 设置 UI 端口（默认为 3000）
+--ui-port PORT       # 设置 UI 端口（默认为 8501）
 --config PATH        # 配置文件路径
---run-setup          # 在启动前运行安装脚本
+--setup              # 在启动前运行 Langraph 安装脚本
+--setup-all          # 在启动前运行完整安装脚本
 --no-browser         # 不自动打开浏览器
---use-original       # 使用原始 MCP 服务器而不是 Langraph 架构
+
+# langraph_server.py 参数
+--host HOST          # 设置服务器主机地址（默认为 127.0.0.1）
+--port PORT          # 设置服务器端口（默认为 8000）
+--config PATH        # 配置文件路径
+--setup              # 在启动前运行安装脚本
+--standard           # 使用标准模式（不使用 Langraph）
+```
+
+### 配置 Langraph
+
+在 `config.yaml` 文件中，可以通过以下配置启用或禁用 Langraph 架构：
+
+```yaml
+server:
+  use_langraph: true  # 设置为 false 使用标准架构
+  host: "127.0.0.1"
+  port: 8000
 ```
 
 ### Langraph 架构的优势
@@ -354,31 +385,20 @@ python scripts/start_with_langraph.py
 5. **更好的错误处理**：每个组件都有独立的错误处理机制
 6. **更清晰的代码结构**：基于图形的组件结构使代码更易于理解和维护
 
-### 开发新组件
+### 故障排除
 
-要在 Langraph 架构中添加新组件，请按照以下步骤操作：
+如果在使用 Langraph 架构时遇到问题，请尝试以下步骤：
 
-1. 在 `mcp/langraph/` 目录下创建新的组件文件
-2. 继承 `MCPComponent` 类并实现必要的方法
-3. 在 `mcp/langraph/mcp_server.py` 中注册新组件
-4. 更新 `mcp/langraph/integration.py` 以集成新组件
+1. **检查日志文件**：查看 `logs/langraph_server.log` 获取详细错误信息
+2. **重新安装依赖**：运行 `python scripts/setup_langraph.py` 重新安装依赖
+3. **检查配置文件**：确保 `config.yaml` 中的配置正确
+4. **使用标准模式**：如果问题仍然存在，可以尝试使用标准模式 `python start.py`
 
-示例组件实现：
+常见问题：
 
-```python
-from mcp.langraph.core import MCPComponent, MCPState
-
-class MyCustomComponent(MCPComponent):
-    def __init__(self, name="my_component", config=None):
-        super().__init__(name=name, description="My custom component")
-        self.config = config or {}
-    
-    def to_runnable(self):
-        def _run(state: MCPState, config=None):
-            # 实现组件逻辑
-            return {"result": "处理结果"}
-        return _run
-```
+- **ImportError**：缺少依赖，运行 `python scripts/setup_langraph.py` 安装
+- **连接错误**：检查 AnythingLLM API 配置是否正确
+- **组件初始化失败**：检查日志文件获取详细信息
 
 ## License
 
