@@ -26,6 +26,14 @@ logger = logging.getLogger("setup_all_with_langraph")
 # Project root directory
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
+# 导入 FFmpeg 安装模块
+try:
+    from scripts.setup_ffmpeg import setup_ffmpeg
+except ImportError:
+    # 如果是直接运行脚本，则需要调整导入路径
+    sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
+    from scripts.setup_ffmpeg import setup_ffmpeg
+
 def run_script(script_name, args=None):
     """
     Run the specified Python script
@@ -180,6 +188,7 @@ def main():
     parser.add_argument("--skip-gmail", action="store_true", help="Skip Gmail setup")
     parser.add_argument("--skip-langraph", action="store_true", help="Skip Langraph setup")
     parser.add_argument("--use-langraph", action="store_true", help="Use Langraph architecture by default")
+    parser.add_argument("--skip-ffmpeg", action="store_true", help="Skip FFmpeg installation")
     
     args = parser.parse_args()
     
@@ -214,9 +223,19 @@ def main():
     else:
         logger.info("Skipping Langraph setup")
     
+    # 安装 FFmpeg (用于 Whisper)
+    if not args.skip_ffmpeg and not args.skip_whisper:
+        logger.info("\nStep 3: Installing FFmpeg (required for Whisper)")
+        if not setup_ffmpeg():
+            logger.warning("FFmpeg installation failed or requires manual intervention")
+            logger.warning("Please run scripts/install_ffmpeg.bat as administrator")
+            logger.warning("Or download and install FFmpeg manually: https://ffmpeg.org/download.html")
+    else:
+        logger.info("Skipping FFmpeg installation")
+    
     # Install and set up Whisper
     if not args.skip_whisper:
-        logger.info("\nStep 3: Installing and setting up Whisper")
+        logger.info("\nStep 4: Installing and setting up Whisper")
         whisper_args = ["--model", args.whisper_model]
         if not run_script("setup_whisper.py", whisper_args):
             logger.error("Whisper installation failed, deployment continues but speech transcription may not be available")
@@ -225,7 +244,7 @@ def main():
     
     # Set up knowledge base
     if not args.skip_knowledge:
-        logger.info("\nStep 4: Setting up knowledge base")
+        logger.info("\nStep 5: Setting up knowledge base")
         if not run_script("setup_knowledge.py"):
             logger.error("Knowledge base setup failed, deployment continues but knowledge base features may not be available")
     else:
@@ -233,14 +252,14 @@ def main():
     
     # Set up Gmail integration
     if not args.skip_gmail:
-        logger.info("\nStep 5: Setting up Gmail integration")
+        logger.info("\nStep 6: Setting up Gmail integration")
         if not run_script("setup_gmail.py"):
             logger.error("Gmail setup failed, deployment continues but email integration may not be available")
     else:
         logger.info("Skipping Gmail setup")
     
     # Set up scheduled tasks
-    logger.info("\nStep 6: Setting up scheduled tasks")
+    logger.info("\nStep 7: Setting up scheduled tasks")
     if not run_script("setup_cron.py"):
         logger.warning("Scheduled tasks setup failed, deployment continues but automation features may not be available")
     
