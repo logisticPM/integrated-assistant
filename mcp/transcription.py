@@ -73,7 +73,7 @@ class TranscriptionService:
                 headers["x-api-key"] = self.anything_llm_api_key
                 
             response = requests.get(
-                f"{self.anything_llm_api_url}/health",
+                f"{self.anything_llm_api_url}/api/health",
                 headers=headers,
                 timeout=5
             )
@@ -289,7 +289,7 @@ class TranscriptionService:
         start_time = time.time()
         
         response = requests.post(
-            f"{self.anything_llm_api_url}/whisper/transcribe",
+            f"{self.anything_llm_api_url}/api/whisper/transcribe",
             headers=headers,
             json=data,
             timeout=300  # 较长的超时时间，因为转录可能需要一些时间

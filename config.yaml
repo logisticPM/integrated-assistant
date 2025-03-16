@@ -11,7 +11,7 @@ llm:
   # AnythingLLM集成配置
   anything_llm:
     enabled: true
-    api_url: "http://localhost:3001/api"
+    api_url: "http://localhost:3001"
     api_key: "A3QKACB-NVW40SY-HZJ8BE9-5960K5B"  # 如需设置API密钥，请在此处填写
 
 meeting:

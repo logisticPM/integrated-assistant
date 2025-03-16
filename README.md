@@ -177,7 +177,7 @@ llm:
   # AnythingLLM integration
   anything_llm:
     enabled: true
-    api_url: "http://localhost:3001/api"
+    api_url: "http://localhost:3001"  # AnythingLLM API URL
     api_key: ""  # Enter your API key here
 ```
 
@@ -213,7 +213,7 @@ For Gmail setup, follow the instructions in `docs/gmail_setup_guide.md`.
 llm:
   anything_llm:
     enabled: true
-    api_url: "http://localhost:3001/api"  # 替换为您的 AnythingLLM 服务地址
+    api_url: "http://localhost:3001"  # AnythingLLM API URL
     api_key: "your_api_key_here"          # 如果需要，添加您的 API 密钥
 ```
 
@@ -252,7 +252,7 @@ meeting:
 llm:
   anything_llm:
     enabled: true  # 是否启用 AnythingLLM API
-    api_url: "http://localhost:3001/api"  # AnythingLLM API 地址
+    api_url: "http://localhost:3001"  # AnythingLLM API URL
     api_key: ""  # API 密钥（如果需要）
 ```
 

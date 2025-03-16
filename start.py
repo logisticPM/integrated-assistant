@@ -52,7 +52,7 @@ def check_whisper_installation():
                 headers["x-api-key"] = anything_llm_api_key
                 
             response = requests.get(
-                f"{anything_llm_api_url}/health",
+                f"{anything_llm_api_url}/api/health",
                 headers=headers,
                 timeout=5
             )
@@ -105,20 +105,37 @@ def main():
     env = os.environ.copy()
     env["PYTHONPATH"] = ROOT_DIR
     
-    # Use shell=True for Windows compatibility
-    server_process = subprocess.Popen(
-        f"{sys.executable} -m mcp.server",
-        cwd=ROOT_DIR,
-        env=env,
-        shell=True
-    )
-    
-    # Wait for server to start
-    time.sleep(2)
-    
-    # Check if server started successfully
-    if server_process.poll() is not None:
-        logger.error("Server failed to start")
+    # 直接导入并启动服务器，而不是使用子进程
+    try:
+        # 加载配置
+        config_path = os.path.join(ROOT_DIR, "config.yaml")
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        
+        # 确保 MCP 配置存在
+        if "mcp" not in config:
+            config["mcp"] = {}
+        
+        # 设置服务器配置
+        config["mcp"]["server_host"] = args.host
+        config["mcp"]["server_port"] = args.port
+        config["mcp"]["max_workers"] = 10
+        
+        # 导入服务器模块
+        from mcp.server import MCPServer, start_mcp_server
+        
+        # 启动服务器（后台线程）
+        server_thread = start_mcp_server(config)
+        
+        # 检查服务器是否启动成功
+        time.sleep(2)
+        if not server_thread.is_alive():
+            logger.error("Server failed to start")
+            return 1
+        
+        logger.info(f"MCP server started successfully at {args.host}:{args.port}")
+    except Exception as e:
+        logger.error(f"Failed to start server: {str(e)}")
         return 1
     
     # Start frontend UI
@@ -153,9 +170,6 @@ def main():
         # Ensure both processes are terminated
         if ui_process.poll() is None:
             ui_process.terminate()
-        
-        if server_process.poll() is None:
-            server_process.terminate()
     
     logger.info("Integrated Assistant service stopped")
     return 0
