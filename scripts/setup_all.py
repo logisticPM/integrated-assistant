@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-集成助手一键部署脚本
-用于安装和配置所有必要的组件，包括Whisper、知识库和AnythingLLM集成
+Integrated Assistant One-Click Deployment Script
+For installing and configuring all necessary components, including Whisper, knowledge base, and AnythingLLM integration
 """
 
 import os
@@ -16,26 +16,26 @@ import time
 import getpass
 from pathlib import Path
 
-# 配置日志
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("setup_all")
 
-# 项目根目录
+# Project root directory
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 def run_script(script_name, args=None):
     """
-    运行指定的Python脚本
+    Run the specified Python script
     
     Args:
-        script_name: 脚本名称
-        args: 命令行参数
+        script_name: Script name
+        args: Command line arguments
     
     Returns:
-        是否成功
+        Success status
     """
     script_path = os.path.join(ROOT_DIR, "scripts", script_name)
     cmd = [sys.executable, script_path]
@@ -43,25 +43,26 @@ def run_script(script_name, args=None):
     if args:
         cmd.extend(args)
     
-    logger.info(f"运行脚本: {script_name} {' '.join(args) if args else ''}")
+    logger.info(f"Running script: {script_name} {' '.join(args) if args else ''}")
     
     try:
-        result = subprocess.run(cmd, check=True)
+        # Use shell=True for Windows compatibility
+        result = subprocess.run(" ".join(cmd), check=True, shell=True)
         return result.returncode == 0
     except subprocess.CalledProcessError as e:
-        logger.error(f"运行脚本 {script_name} 失败: {str(e)}")
+        logger.error(f"Failed to run script {script_name}: {str(e)}")
         return False
 
 def update_config_anything_llm(api_key=None, api_url=None):
     """
-    更新配置文件中的AnythingLLM设置
+    Update AnythingLLM settings in the configuration file
     
     Args:
-        api_key: AnythingLLM API密钥
+        api_key: AnythingLLM API key
         api_url: AnythingLLM API URL
     
     Returns:
-        是否成功
+        Success status
     """
     config_path = os.path.join(ROOT_DIR, "config.yaml")
     
@@ -69,7 +70,7 @@ def update_config_anything_llm(api_key=None, api_url=None):
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
         
-        # 更新AnythingLLM配置
+        # Update AnythingLLM configuration
         if "llm" not in config:
             config["llm"] = {}
         
@@ -84,114 +85,115 @@ def update_config_anything_llm(api_key=None, api_url=None):
         if api_url:
             config["llm"]["anything_llm"]["api_url"] = api_url
         
-        # 写回配置文件
+        # Write back to configuration file
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
         
-        logger.info("已更新AnythingLLM配置")
+        logger.info("AnythingLLM configuration updated")
         return True
     
     except Exception as e:
-        logger.error(f"更新AnythingLLM配置失败: {str(e)}")
+        logger.error(f"Failed to update AnythingLLM configuration: {str(e)}")
         return False
 
 def create_directories():
     """
-    创建必要的目录结构
+    Create necessary directory structure
     
     Returns:
-        是否成功
+        Success status
     """
     try:
+        # Create directories
         directories = [
             os.path.join(ROOT_DIR, "data"),
             os.path.join(ROOT_DIR, "data", "audio"),
             os.path.join(ROOT_DIR, "data", "transcriptions"),
-            os.path.join(ROOT_DIR, "data", "documents"),
-            os.path.join(ROOT_DIR, "data", "vector_db"),
+            os.path.join(ROOT_DIR, "data", "knowledge"),
+            os.path.join(ROOT_DIR, "data", "emails"),
             os.path.join(ROOT_DIR, "models"),
             os.path.join(ROOT_DIR, "models", "llm"),
             os.path.join(ROOT_DIR, "models", "embedding"),
-            os.path.join(ROOT_DIR, "credentials"),
+            os.path.join(ROOT_DIR, "logs")
         ]
         
         for directory in directories:
             os.makedirs(directory, exist_ok=True)
-            logger.info(f"创建目录: {directory}")
+            logger.info(f"Created directory: {directory}")
         
         return True
     
     except Exception as e:
-        logger.error(f"创建目录失败: {str(e)}")
+        logger.error(f"Failed to create directories: {str(e)}")
         return False
 
 def main():
-    """主函数"""
-    parser = argparse.ArgumentParser(description="集成助手一键部署脚本")
+    """Main function"""
+    parser = argparse.ArgumentParser(description="Integrated Assistant One-Click Deployment Script")
     parser.add_argument("--whisper-model", type=str, choices=["tiny", "base", "small", "medium", "large"], 
-                        default="base", help="Whisper模型大小 (默认: base)")
+                        default="base", help="Whisper model size (default: base)")
     parser.add_argument("--anything-llm-url", type=str, 
                         default="http://localhost:3001/api", help="AnythingLLM API URL")
-    parser.add_argument("--skip-whisper", action="store_true", help="跳过Whisper安装")
-    parser.add_argument("--skip-knowledge", action="store_true", help="跳过知识库设置")
-    parser.add_argument("--skip-gmail", action="store_true", help="跳过Gmail设置")
+    parser.add_argument("--skip-whisper", action="store_true", help="Skip Whisper installation")
+    parser.add_argument("--skip-knowledge", action="store_true", help="Skip knowledge base setup")
+    parser.add_argument("--skip-gmail", action="store_true", help="Skip Gmail setup")
     
     args = parser.parse_args()
     
-    logger.info("开始集成助手一键部署")
+    logger.info("Starting Integrated Assistant One-Click Deployment")
     logger.info("=" * 50)
     
-    # 创建必要的目录结构
-    logger.info("步骤1: 创建必要的目录结构")
+    # Create necessary directory structure
+    logger.info("Step 1: Creating necessary directory structure")
     if not create_directories():
-        logger.error("创建目录失败，部署终止")
+        logger.error("Failed to create directories, deployment terminated")
         return 1
     
-    # 询问AnythingLLM API密钥
+    # Ask for AnythingLLM API key
     print("\n" + "=" * 50)
-    print("AnythingLLM集成设置")
+    print("AnythingLLM Integration Setup")
     print("=" * 50)
-    print("请输入AnythingLLM API密钥 (如果没有可以留空):")
-    api_key = getpass.getpass("API密钥: ")
+    print("Please enter your AnythingLLM API key (leave empty if you don't have one):")
+    api_key = getpass.getpass("API Key: ")
     
-    # 更新AnythingLLM配置
+    # Update AnythingLLM configuration
     if not update_config_anything_llm(api_key=api_key, api_url=args.anything_llm_url):
-        logger.warning("更新AnythingLLM配置失败，将使用默认配置")
+        logger.warning("Failed to update AnythingLLM configuration, will use default settings")
     
-    # 安装和设置Whisper
+    # Install and set up Whisper
     if not args.skip_whisper:
-        logger.info("\n步骤2: 安装和设置Whisper")
+        logger.info("\nStep 2: Installing and setting up Whisper")
         whisper_args = ["--model", args.whisper_model]
         if not run_script("setup_whisper.py", whisper_args):
-            logger.error("Whisper安装失败，部署继续但语音转录功能可能不可用")
+            logger.error("Whisper installation failed, deployment continues but speech transcription may not be available")
     else:
-        logger.info("跳过Whisper安装")
+        logger.info("Skipping Whisper installation")
     
-    # 设置知识库
+    # Set up knowledge base
     if not args.skip_knowledge:
-        logger.info("\n步骤3: 设置知识库")
+        logger.info("\nStep 3: Setting up knowledge base")
         if not run_script("setup_knowledge.py"):
-            logger.error("知识库设置失败，部署继续但知识库功能可能不可用")
+            logger.error("Knowledge base setup failed, deployment continues but knowledge base features may not be available")
     else:
-        logger.info("跳过知识库设置")
+        logger.info("Skipping knowledge base setup")
     
-    # 设置Gmail集成
+    # Set up Gmail integration
     if not args.skip_gmail:
-        logger.info("\n步骤4: 设置Gmail集成")
+        logger.info("\nStep 4: Setting up Gmail integration")
         if not run_script("setup_gmail.py"):
-            logger.error("Gmail设置失败，部署继续但邮件集成功能可能不可用")
+            logger.error("Gmail setup failed, deployment continues but email integration may not be available")
     else:
-        logger.info("跳过Gmail设置")
+        logger.info("Skipping Gmail setup")
     
-    # 设置定时任务
-    logger.info("\n步骤5: 设置定时任务")
+    # Set up scheduled tasks
+    logger.info("\nStep 5: Setting up scheduled tasks")
     if not run_script("setup_cron.py"):
-        logger.warning("定时任务设置失败，部署继续但自动化功能可能不可用")
+        logger.warning("Scheduled tasks setup failed, deployment continues but automation features may not be available")
     
     logger.info("\n" + "=" * 50)
-    logger.info("集成助手部署完成!")
-    logger.info("您可以通过运行以下命令启动服务:")
-    logger.info(f"cd {ROOT_DIR} && python -m mcp.server")
+    logger.info("Integrated Assistant deployment completed!")
+    logger.info("You can start the service by running the following command:")
+    logger.info(f"python {os.path.join(ROOT_DIR, 'start.py')}")
     logger.info("=" * 50)
     
     return 0

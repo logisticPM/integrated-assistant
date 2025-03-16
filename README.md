@@ -1,297 +1,219 @@
-# 集成助手 (Integrated Assistant)
+# Integrated Assistant
 
-集成助手是一个多功能AI辅助工具，结合了会议记录处理、邮件AI助手和本地知识库功能，通过MCP（消息通信协议）服务实现模块间的高效通信。
+An intelligent assistant that integrates meeting recording transcription, summarization, knowledge base, and email management capabilities.
 
-## 功能特点
+## Features
 
-### 会议记录处理
-- 上传和管理会议音频文件
-- 自动转录会议内容
-- 生成会议摘要和提取关键点
-- 按主题和参与者组织会议记录
+- **Speech Transcription**: Automatically transcribe meeting recordings using Whisper
+- **Meeting Summarization**: Generate structured meeting summaries with key points and action items
+- **Knowledge Base**: Build and query a knowledge base for your organization
+- **Email Integration**: Synchronize and manage emails, with automatic analysis and response suggestions
+- **Scheduled Tasks**: Automatically process new recordings and emails
 
-### 邮件AI助手
-- 邮件同步和管理
-- 智能邮件分类和优先级排序
-- 情感分析和关键信息提取
-- 自动生成邮件回复建议
+## Installation and Configuration
 
-### 本地知识库
-- 文档上传和管理
-- 文本向量化和语义搜索
-- 基于知识库的问答功能
-- 支持多种文档格式
-
-### MCP服务
-- 模块间的统一通信接口
-- 支持同步和异步调用
-- 任务状态跟踪和管理
-- 可扩展的服务注册机制
-
-## 项目结构
-
-```
-integrated-assistant/
-├── app.py                  # 主应用入口
-├── config.yaml             # 全局配置
-├── frontend/               # Gradio前端
-│   ├── main_ui.py          # 主界面
-│   ├── meeting_ui.py       # 会议模块UI
-│   ├── email_ui.py         # 邮件模块UI
-│   └── knowledge_ui.py     # 知识库模块UI
-├── modules/                # 功能模块
-│   ├── meeting/            # 会议记录模块
-│   ├── email/              # 邮件助手模块
-│   └── knowledge/          # 知识库模块
-├── mcp/                    # MCP服务
-│   ├── client.py           # MCP客户端
-│   ├── server.py           # MCP服务器
-│   ├── transcription.py    # 转录服务
-│   ├── llm_adapter.py      # LLM适配服务
-│   ├── vector_service.py   # 向量数据库服务
-│   ├── docloader.py        # 文档加载器
-│   ├── text_splitter.py    # 文本分块器
-│   ├── embedder.py         # 向量嵌入器
-│   └── email_service.py    # 邮件服务
-├── db/                     # 数据库管理
-│   ├── db_manager.py       # SQLite数据库管理
-│   └── vector_db.py        # 向量数据库管理
-└── utils/                  # 工具函数
-```
-
-## 安装与配置
-
-### 系统要求
+### System Requirements
 - Python 3.8+
-- 足够的磁盘空间用于存储文档和向量数据库
-- 互联网连接（用于邮件同步和可选的远程LLM服务）
-- 对于语音转录功能，建议有GPU加速（非必须）
+- Sufficient disk space for documents and vector database
+- Internet connection (for email synchronization and optional remote LLM services)
+- GPU acceleration recommended for speech transcription (not required)
 
-### 一键部署
+### One-Click Deployment
 
-项目提供了一键部署脚本，可以自动完成所有必要组件的安装和配置：
+The project provides a one-click deployment script that automatically installs and configures all necessary components:
 
-```bash
-python scripts/setup_all.py
+```powershell
+python scripts\setup_all.py
 ```
 
-部署过程中，您可以：
-- 输入AnythingLLM的API密钥（如果有）
-- 选择Whisper模型大小（默认为base）
-- 配置其他集成服务
+During deployment, you can:
+- Enter your AnythingLLM API key (if you have one)
+- Select Whisper model size (default is base)
+- Configure other integration services
 
-可用的命令行参数：
+Available command line arguments:
 ```
---whisper-model [tiny/base/small/medium/large]  # 选择Whisper模型大小
---anything-llm-url URL                          # 设置AnythingLLM API URL
---skip-whisper                                  # 跳过Whisper安装
---skip-knowledge                                # 跳过知识库设置
---skip-gmail                                    # 跳过Gmail设置
+--whisper-model [tiny/base/small/medium/large]  # Select Whisper model size
+--anything-llm-url URL                          # Set AnythingLLM API URL
+--skip-whisper                                  # Skip Whisper installation
+--skip-knowledge                                # Skip knowledge base setup
+--skip-gmail                                    # Skip Gmail setup
 ```
 
-### 单独组件安装
+### Individual Component Installation
 
-如果您只需要安装特定组件，可以使用以下脚本：
+If you only need to install specific components, you can use the following scripts:
 
-1. 克隆仓库
-```bash
+1. Clone the repository
+```powershell
 git clone https://github.com/yourusername/integrated-assistant.git
 cd integrated-assistant
 ```
 
-2. 安装依赖
-```bash
+2. Install dependencies
+```powershell
 pip install -r requirements.txt
 ```
 
-3. 安装Whisper（用于语音转录）
-```bash
-# 运行Whisper安装脚本
-python scripts/setup_whisper.py --model base
+3. Install Whisper (for speech transcription)
+```powershell
+# Run Whisper installation script
+python scripts\setup_whisper.py --model base
 ```
 
-4. 安装知识库组件
-```bash
-# 运行知识库安装脚本
-python scripts/setup_knowledge.py --model all-MiniLM-L6-v2
+4. Install knowledge base components
+```powershell
+# Run knowledge base setup script
+python scripts\setup_knowledge.py --model all-MiniLM-L6-v2
 ```
 
-5. 配置应用
-编辑 `config.yaml` 文件，设置LLM模型路径、邮件服务器信息等。
+5. Configure the application
+Edit the `config.yaml` file to set LLM model paths, email server information, etc.
 
-6. 运行应用
-```bash
+6. Run the application
+```powershell
 python app.py
 ```
 
-应用将在 http://localhost:7860 启动。
+The application will start at http://localhost:7860.
 
-## 启动服务
+## Starting the Service
 
-### 一键启动
+### One-Click Startup
 
-使用一键启动脚本可以同时启动后端服务和前端UI：
+Use the one-click startup script to start both the backend service and frontend UI:
 
-```bash
+```powershell
 python start.py
 ```
 
-启动脚本会自动打开浏览器访问集成助手界面。
+The startup script will automatically open a browser to access the Integrated Assistant interface.
 
-可用的命令行参数：
+Available command line arguments:
 ```
---host HOST          # 设置服务器主机地址（默认为0.0.0.0）
---port PORT          # 设置服务器端口（默认为7860）
---no-browser         # 不自动打开浏览器
---setup              # 在启动前运行安装脚本
-```
-
-### 手动启动
-
-1. 启动后端服务
-```bash
-python app.py
+--host HOST          # Set server host address (default is 0.0.0.0)
+--port PORT          # Set server port (default is 7860)
+--no-browser         # Don't automatically open browser
+--setup              # Run setup script before starting
 ```
 
-2. 启动前端UI
-```bash
-python frontend/main_ui.py
+### Manual Startup
+
+1. Start the backend service
+```powershell
+python -m mcp.server
 ```
 
-## 配置说明
+2. Start the frontend UI
+```powershell
+python -m frontend.app
+```
 
-### Whisper语音转录配置
+## Configuration Guide
+
+### Whisper Speech Transcription Configuration
+
+Whisper is used for speech transcription. You can configure it in the `config.yaml` file:
+
 ```yaml
-meeting:
-  audio_dir: "./data/audio"
-  transcription_dir: "./data/transcriptions"
-  whisper:
-    model: "base"  # tiny, base, small, medium, large
-    language: "auto"  # 设置为auto自动检测语言，或指定语言代码如zh、en
+whisper:
+  model: "base"  # Options: tiny, base, small, medium, large
+  language: "auto"  # Language code or "auto" for automatic detection
+  device: "cuda"  # Use "cpu" if no GPU is available
 ```
 
-### 知识库配置
-```yaml
-knowledge:
-  docs_dir: "./data/documents"  # 文档存储目录
-  chunk_size: 1000              # 文本块大小
-  chunk_overlap: 200            # 文本块重叠大小
-  embedding_model: "all-MiniLM-L6-v2"  # 嵌入模型名称
-  splitter_type: "smart"        # 分块器类型：simple, markdown, smart
-  supported_extensions:          # 支持的文件扩展名
-    - ".txt"
-    - ".md"
-    - ".pdf"
-    - ".docx"
-    - ".html"
-    - ".csv"
-  use_mock_embedder: false      # 是否使用模拟嵌入器（用于测试）
-  vector_search_top_k: 5        # 向量搜索返回的最大结果数
-```
+Different model sizes have different resource requirements:
+- tiny: ~1GB disk space, minimal RAM
+- base: ~1GB disk space, ~2GB RAM
+- small: ~2GB disk space, ~4GB RAM
+- medium: ~5GB disk space, ~8GB RAM
+- large: ~10GB disk space, ~16GB RAM
 
-### LLM配置
+### LLM Configuration
+
+The system supports both local LLM models and AnythingLLM integration:
+
 ```yaml
 llm:
   model: "local"  # local, openai, etc.
   model_path: "./models/llm"
   embedding_model: "local"
   embedding_model_path: "./models/embedding"
+  # AnythingLLM integration
   anything_llm:
-    enabled: false
-    api_url: "http://localhost:3000/api"
-    api_key: ""
+    enabled: true
+    api_url: "http://localhost:3001/api"
+    api_key: ""  # Enter your API key here
 ```
 
-### 邮件配置
+### Email Integration
+
+To configure email integration, set up the following in `config.yaml`:
+
 ```yaml
 email:
-  sync_interval: 300  # 秒
-  max_emails: 1000
-  providers:
-    - name: "gmail"
-      enabled: false
-      credentials_file: "./credentials/gmail.json"
+  enabled: true
+  sync_interval: 300  # Seconds between email syncs
+  provider: "gmail"  # Currently only Gmail is supported
+  credentials_file: "./credentials/gmail_token.json"
+  # Email folders to monitor
+  folders:
+    - "INBOX"
+    - "Sent"
 ```
 
-### Gmail认证设置
+For Gmail setup, follow the instructions in `docs/gmail_setup_guide.md`.
 
-集成助手的邮件功能**仅支持Gmail**，通过OAuth 2.0认证访问Gmail API。要设置Gmail认证，请按照以下步骤操作：
+## Usage
 
-1. 在Google Cloud Console创建项目并启用Gmail API
-2. 创建OAuth 2.0客户端ID并下载客户端密钥文件
-3. 运行Gmail设置脚本：
-   ```bash
-   python scripts/setup_gmail.py --client-secret /path/to/your/client_secret.json
-   ```
-4. 按照浏览器中的提示完成授权流程
+### Meeting Management
 
-详细的设置指南请参考 [Gmail设置指南](docs/gmail_setup_guide.md)。
+1. Upload meeting recordings
+2. View and search meeting transcriptions
+3. Generate and export meeting summaries
+4. Track action items from meetings
 
-## 使用指南
+### Knowledge Base
 
-### 会议记录处理
-1. 在会议模块中上传音频文件
-2. 系统自动转录并生成摘要
-3. 查看会议详情和关键点
+1. Add documents to the knowledge base
+2. Query the knowledge base with natural language questions
+3. Get relevant information from your organization's documents
 
-### 邮件助手
-1. 配置邮件账户信息
-2. 同步邮件
-3. 查看邮件分析和回复建议
+### Email Management
 
-### 知识库
-1. 上传文档到知识库
-   - 支持多种格式：TXT、Markdown、PDF、Word、HTML、CSV
-   - 添加标签和分类以便更好地组织文档
-2. 文档处理流程
-   - 文档自动加载和文本提取
-   - 智能分块以保留语义完整性
-   - 向量化存储以支持语义搜索
-3. 使用知识库
-   - 通过关键词或自然语言查询搜索文档
-   - 查看搜索结果和相关度评分
-   - 访问原始文档和相关片段
+1. View and search emails
+2. Analyze email content and sentiment
+3. Generate response suggestions
+4. Schedule follow-ups
 
-### 测试知识库功能
-可以使用测试脚本验证知识库功能是否正常工作：
-```bash
-# 使用默认配置测试知识库功能
-python scripts/test_knowledge.py
+## Development
 
-# 使用模拟嵌入器进行测试（无需下载大型模型）
-python scripts/test_knowledge.py --use-mock
+### Project Structure
 
-# 使用自定义测试文件
-python scripts/test_knowledge.py --test-file /path/to/your/test/document.pdf
+```
+integrated-assistant/
+├── mcp/                  # Main component package
+│   ├── server.py         # Backend server
+│   ├── transcription.py  # Speech transcription service
+│   ├── llm_adapter.py    # LLM integration
+│   ├── meeting_service.py # Meeting management
+│   └── ...
+├── frontend/             # Frontend UI
+├── scripts/              # Setup and utility scripts
+├── data/                 # Data storage
+├── models/               # Model storage
+├── config.yaml           # Configuration file
+└── README.md             # This file
 ```
 
-## 开发者指南
+### Adding New Features
 
-### 添加新服务
-1. 在 `mcp/` 目录下创建新的服务模块
-2. 实现服务类和注册函数
-3. 在 `mcp/server.py` 中导入并注册新服务
+To add new features, follow these steps:
+1. Add service implementation in the `mcp` package
+2. Register the service in `mcp/server.py`
+3. Add UI components in the `frontend` package
+4. Update configuration in `config.yaml` if needed
 
-### 扩展前端界面
-1. 在 `frontend/` 目录下创建新的UI组件
-2. 在 `frontend/main_ui.py` 中集成新组件
-3. 通过MCP客户端连接后端服务
+## License
 
-### 扩展知识库功能
-1. 添加新的文档加载器
-   - 在 `mcp/docloader.py` 中创建新的加载器类
-   - 在 `get_loader_for_file` 函数中注册新的文件类型
-2. 改进文本分块策略
-   - 在 `mcp/text_splitter.py` 中创建新的分块器类
-   - 更新 `get_text_splitter` 函数以支持新的分块器
-3. 集成更高级的向量数据库
-   - 修改 `mcp/vector_service.py` 中的向量存储和检索逻辑
-   - 更新 `_vectorize_chunks` 和 `search` 方法
-
-## 许可证
-
-MIT License
-
-## 贡献
-
-欢迎提交问题和功能请求！
+This project is licensed under the MIT License - see the LICENSE file for details.
